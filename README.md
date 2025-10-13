@@ -97,7 +97,18 @@ Example command to run fold 11 of the baseline model:
 ```bash 
 python src/train.py --data.data_fold_id 11 --config=cfgs/UTAE/all_features.yaml --trainer=cfgs/trainer_single_gpu.yaml --data=cfgs/data_multitemporal_full_features_doys.yaml --seed_everything=0  --do_test=True --data.data_dir /path/to/your/hdf5/dataset 
 ```
+For setups on the I-Math cluster, you might have to change wandb folders to those which you have read/write permissions to as it will default to /tmp which you don't have permission to edit. Might be helpful to run the following from the ai4good25-wildfire directory before trying to run:
 
+'''
+# 1) make writeable dirs
+mkdir -p ./lightning_logs/wandb ./.wandb_cache ./.wandb_config ./tmp
+
+# 2) tell wandb + libs to use them
+export WANDB_DIR="$PWD/lightning_logs/wandb"
+export WANDB_CACHE_DIR="$PWD/.wandb_cache"
+export WANDB_CONFIG_DIR="$PWD/.wandb_config"
+export TMPDIR="$PWD/tmp"
+'''
 
 ## 5. Tips 🛟
 
