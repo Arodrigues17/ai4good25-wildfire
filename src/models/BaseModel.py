@@ -73,26 +73,65 @@ class BaseModel(pl.LightningModule, ABC):
         return self.model(x)
 
     def get_pred_and_gt(self, batch):
-        """_summary_ Unbatch the data and perform inference on each sample.
+        """Accept tuple/list/dict batches and forward optional extras when supported."""
+        doys = None
+        extra_kwargs = {}
+        batch_hint = None
 
-        Args:
-            batch (_type_): _description_ Either a tuple of (x, y) or (x, y, doys).
-
-        Raises:
-            ValueError: _description_ If the batch size is not 1 and the model requires repeated inference on crops of the image. 
-            This is the case for ConvLSTM, when predicting on the test set. During training, it uses random crops of the required size,
-            so larger batch sizes can be used. 
-
-        Returns:
-            _type_: _description_ Prediction and ground truth for each sample in the batch.
-        """
-
-        # UTAE and TSViT use an additional doy feature as input. 
-        if self.hparams.use_doy:
-            x, y, doys = batch
+        if isinstance(batch, dict):
+            x = batch.get("x", batch.get("inputs"))
+            y = batch.get("y", batch.get("target"))
+            if x is None or y is None:
+                raise KeyError(f"Expected 'x'/'y' (or 'inputs'/'target') in dict batch. Keys: {list(batch.keys())}")
+            for key in ("doy", "doys", "day_of_year"):
+                if key in batch:
+                    doys = batch[key]
+                    break
+            extra_kwargs = {k: v for k, v in batch.items() if k not in ("x", "inputs", "y", "target")}
+            batch_hint = list(batch.keys())
+        elif isinstance(batch, (list, tuple)):
+            if len(batch) < 2:
+                raise ValueError(f"Batch must contain at least (x, y), got length={len(batch)}")
+            x, y, *extras = batch
+            batch_hint = f"tuple(len={len(batch)})"
+            if extras:
+                if isinstance(extras[-1], dict):
+                    extra_kwargs = extras.pop()
+                if extras:
+                    doys = extras[0]
         else:
-            x, y = batch
+            raise TypeError(f"Unsupported batch type: {type(batch)}")
+
+        if not self.hparams.use_doy:
             doys = None
+        elif doys is None and not hasattr(self, "_warned_missing_doy"):
+            self._warned_missing_doy = True
+            self.print(f"[BaseModel] Expected DOY tensor but none found. Batch structure: {batch_hint}")
+
+        forward_kwargs = dict(extra_kwargs)
+        if self.hparams.use_doy and doys is not None:
+            forward_kwargs.setdefault("doys", doys)
+
+        def _call_forward(x_tensor):
+            attempt_kwargs = dict(forward_kwargs)
+            try:
+                return self(x_tensor, **attempt_kwargs)
+            except TypeError:
+                if attempt_kwargs and not hasattr(self, "_warned_forward_kwargs"):
+                    self._warned_forward_kwargs = True
+                    self.print(f"[BaseModel] Forward ignored extra kwargs: {list(attempt_kwargs.keys())}")
+                attempt_kwargs.pop("doys", None)
+                if attempt_kwargs:
+                    try:
+                        return self(x_tensor, **attempt_kwargs)
+                    except TypeError:
+                        pass
+                if self.hparams.use_doy and doys is not None:
+                    try:
+                        return self(x_tensor, doys)
+                    except TypeError:
+                        pass
+                return self(x_tensor)
 
         # If the model requires a certain fixed size, perform repeated inference on crops of the image,
         # and aggregate the results. When we reach the last row or column, which might not be divisible by
@@ -137,13 +176,12 @@ class BaseModel(pl.LightningModule, ABC):
 
                         x_crop = x[:, :, :, H1:H2, W1:W2]
 
-                        agg_output[:, H1:H2, W1:W2] = self(x_crop, doys).squeeze(1)
+                        agg_output[:, H1:H2, W1:W2] = _call_forward(x_crop).squeeze(1)
 
                 y_hat = agg_output
                 return y_hat, y
 
-        y_hat = self(x, doys).squeeze(1)
-
+        y_hat = _call_forward(x).squeeze(1)
         return y_hat, y
 
     def training_step(self, batch, batch_idx):
