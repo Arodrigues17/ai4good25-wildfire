@@ -93,27 +93,32 @@ class PrithviEO2Lightning(BaseModel):
             nn.Conv2d(head_hidden_dim, 1, kernel_size=1),
         )
         self._last_patch_hw = None
+        self._curr_input_hw = None
 
-    def _backbone_grid_size(self) -> Optional[tuple[int, int]]:
-        def _extract_hw(grid_obj):
-            try:
-                vals = list(grid_obj)
-            except TypeError:
-                return None
-            if len(vals) >= 2:
-                return int(vals[-2]), int(vals[-1])
-            return None
-
+    def _backbone_patch_hw(self) -> Optional[tuple[int, int]]:
         bb = self.backbone
-        if hasattr(bb, "patch_embed") and hasattr(bb.patch_embed, "grid_size"):
-            hw = _extract_hw(bb.patch_embed.grid_size)
-            if hw is not None:
-                return hw
-        model = getattr(bb, "model", None)
-        if model is not None and hasattr(model, "patch_embed") and hasattr(model.patch_embed, "grid_size"):
-            hw = _extract_hw(model.patch_embed.grid_size)
-            if hw is not None:
-                return hw
+        candidates = (
+            getattr(getattr(bb, "patch_embed", None), "patch_size", None),
+            getattr(getattr(getattr(bb, "model", None), "patch_embed", None), "patch_size", None),
+        )
+        patch_size = next((ps for ps in candidates if ps is not None), None)
+        if patch_size is None:
+            proj = getattr(getattr(getattr(bb, "patch_embed", None), "proj", None), "kernel_size", None)
+            if proj is None:
+                proj = getattr(
+                    getattr(getattr(getattr(bb, "model", None), "patch_embed", None), "proj", None),
+                    "kernel_size",
+                    None,
+                )
+            if proj is None:
+                return None
+            patch_size = proj
+        if isinstance(patch_size, int):
+            return int(patch_size), int(patch_size)
+        if isinstance(patch_size, (tuple, list)):
+            if len(patch_size) == 1:
+                return int(patch_size[0]), int(patch_size[0])
+            return int(patch_size[-2]), int(patch_size[-1])
         return None
 
     def _pad_to_patch_size(self, x: torch.Tensor) -> tuple[torch.Tensor, int, int]:
@@ -189,42 +194,50 @@ class PrithviEO2Lightning(BaseModel):
             raise ValueError(f"Expected (B, L, C) tokens, got {tuple(tokens.shape)}.")
         b, seq_len, c = tokens.shape
         working = tokens
+        patch_hw = self._backbone_patch_hw()
+        curr_hw = getattr(self, "_curr_input_hw", None)
+        gh = gw = None
 
-        def _is_square(n: int) -> bool:
-            side = int(round(n ** 0.5))
-            return side * side == n
-
-        grid = self._backbone_grid_size()
-        if grid is not None:
-            gh, gw = grid
+        if patch_hw is not None and curr_hw is not None:
+            ph, pw = patch_hw
+            H, W = curr_hw
+            if H % ph != 0 or W % pw != 0:
+                raise ValueError(f"Input {H}x{W} is not divisible by patch {ph}x{pw}.")
+            gh, gw = H // ph, W // pw
             patch_area = gh * gw
             if remove_cls_token and seq_len == patch_area + 1:
                 working = working[:, 1:, :]
                 seq_len = patch_area
-            elif remove_cls_token and seq_len != patch_area and _is_square(seq_len - 1):
+            elif remove_cls_token and seq_len != patch_area and seq_len - 1 == patch_area:
                 working = working[:, 1:, :]
-                seq_len -= 1
-                gh = gw = int(round(seq_len ** 0.5))
-                patch_area = gh * gw
-            if seq_len != patch_area:
-                if _is_square(seq_len):
-                    gh = gw = int(round(seq_len ** 0.5))
-                elif remove_cls_token and _is_square(seq_len - 1):
+                seq_len = patch_area
+            elif seq_len != patch_area:
+                gh = gw = None  # fall back to inference below
+
+        def _infer_hw(n: int) -> Optional[tuple[int, int]]:
+            for h in range(int(n ** 0.5), 0, -1):
+                if n % h == 0:
+                    return h, n // h
+            return None
+
+        if gh is None or gw is None:
+            try_candidates = []
+            if remove_cls_token and seq_len > 1:
+                try_candidates.append((seq_len - 1, True))
+            try_candidates.append((seq_len, False))
+            for n, drop in try_candidates:
+                if n <= 0:
+                    continue
+                hw = _infer_hw(n)
+                if hw is None:
+                    continue
+                if drop and remove_cls_token:
                     working = working[:, 1:, :]
-                    seq_len -= 1
-                    gh = gw = int(round(seq_len ** 0.5))
-                else:
-                    raise ValueError(
-                        f"Token length {seq_len} not compatible with grid ({gh},{gw}) and not square."
-                    )
-        else:
-            if remove_cls_token and _is_square(seq_len - 1):
-                working = working[:, 1:, :]
-                seq_len -= 1
-            side = int(round(seq_len ** 0.5))
-            if side * side != seq_len:
-                raise ValueError(f"Cannot infer square grid from token length {seq_len}.")
-            gh = gw = side
+                    seq_len = n
+                gh, gw = hw
+                break
+            if gh is None or gw is None:
+                raise ValueError(f"Cannot infer (H, W) from token length {seq_len} after CLS handling.")
 
         feat = working.transpose(1, 2).reshape(b, c, gh, gw)
         self._last_patch_hw = (gh, gw)
@@ -240,6 +253,7 @@ class PrithviEO2Lightning(BaseModel):
         self._last_patch_hw = (padded_h // self.patch_size, padded_w // self.patch_size)
         x_backbone = x.permute(0, 2, 1, 3, 4).contiguous()
         x_backbone = self.input_adapter(x_backbone)
+        self._curr_input_hw = tuple(int(d) for d in x_backbone.shape[-2:])
         backbone_output = self._forward_backbone(x_backbone)
         feature = self._extract_feature(backbone_output)
         feature = self._select_spatial_feature(feature)
@@ -250,6 +264,7 @@ class PrithviEO2Lightning(BaseModel):
         if pad_h or pad_w:
             logits = logits[:, :, :orig_h, :orig_w]
         self._last_patch_hw = None
+        self._curr_input_hw = None
         return logits
 
     def configure_optimizers(self):
