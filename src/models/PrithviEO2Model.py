@@ -95,13 +95,25 @@ class PrithviEO2Lightning(BaseModel):
         self._last_patch_hw = None
 
     def _backbone_grid_size(self) -> Optional[tuple[int, int]]:
+        def _extract_hw(grid_obj):
+            try:
+                vals = list(grid_obj)
+            except TypeError:
+                return None
+            if len(vals) >= 2:
+                return int(vals[-2]), int(vals[-1])
+            return None
+
         bb = self.backbone
         if hasattr(bb, "patch_embed") and hasattr(bb.patch_embed, "grid_size"):
-            gh, gw = bb.patch_embed.grid_size
-            return int(gh), int(gw)
-        if hasattr(bb, "model") and hasattr(bb.model, "patch_embed") and hasattr(bb.model.patch_embed, "grid_size"):
-            gh, gw = bb.model.patch_embed.grid_size
-            return int(gh), int(gw)
+            hw = _extract_hw(bb.patch_embed.grid_size)
+            if hw is not None:
+                return hw
+        model = getattr(bb, "model", None)
+        if model is not None and hasattr(model, "patch_embed") and hasattr(model.patch_embed, "grid_size"):
+            hw = _extract_hw(model.patch_embed.grid_size)
+            if hw is not None:
+                return hw
         return None
 
     def _pad_to_patch_size(self, x: torch.Tensor) -> tuple[torch.Tensor, int, int]:
@@ -177,41 +189,43 @@ class PrithviEO2Lightning(BaseModel):
             raise ValueError(f"Expected (B, L, C) tokens, got {tuple(tokens.shape)}.")
         b, seq_len, c = tokens.shape
         working = tokens
+
+        def _is_square(n: int) -> bool:
+            side = int(round(n ** 0.5))
+            return side * side == n
+
         grid = self._backbone_grid_size()
         if grid is not None:
             gh, gw = grid
             patch_area = gh * gw
-            if remove_cls_token and seq_len % patch_area != 0 and (seq_len - 1) % patch_area == 0:
-                working = working[:, 1:, :]
-                seq_len -= 1
-            if seq_len % patch_area == 0 and patch_area > 0:
-                groups = seq_len // patch_area
-                reshaped = working.view(b, groups, patch_area, c)
-                reshaped = reshaped.view(b, groups, gh, gw, c).permute(0, 1, 4, 2, 3).contiguous()
-                self._last_patch_hw = (gh, gw)
-                if groups > 1:
-                    return self.temporal_projector(reshaped)
-                return reshaped[:, 0]
-            inferred = seq_len - (1 if remove_cls_token and seq_len > patch_area else 0)
-            side = int(round(inferred ** 0.5))
-            if side * side != inferred:
-                raise RuntimeError(f"Token count {seq_len} not compatible with grid ({gh},{gw}).")
-            gh = gw = side
-            patch_area = gh * gw
             if remove_cls_token and seq_len == patch_area + 1:
                 working = working[:, 1:, :]
+                seq_len = patch_area
+            elif remove_cls_token and seq_len != patch_area and _is_square(seq_len - 1):
+                working = working[:, 1:, :]
                 seq_len -= 1
-        else:
-            if remove_cls_token and seq_len > 1:
-                candidate = seq_len - 1
-                side = int(round(candidate ** 0.5))
-                if side * side == candidate:
+                gh = gw = int(round(seq_len ** 0.5))
+                patch_area = gh * gw
+            if seq_len != patch_area:
+                if _is_square(seq_len):
+                    gh = gw = int(round(seq_len ** 0.5))
+                elif remove_cls_token and _is_square(seq_len - 1):
                     working = working[:, 1:, :]
                     seq_len -= 1
+                    gh = gw = int(round(seq_len ** 0.5))
+                else:
+                    raise ValueError(
+                        f"Token length {seq_len} not compatible with grid ({gh},{gw}) and not square."
+                    )
+        else:
+            if remove_cls_token and _is_square(seq_len - 1):
+                working = working[:, 1:, :]
+                seq_len -= 1
             side = int(round(seq_len ** 0.5))
             if side * side != seq_len:
-                raise RuntimeError(f"Cannot infer square grid from token length {seq_len}.")
+                raise ValueError(f"Cannot infer square grid from token length {seq_len}.")
             gh = gw = side
+
         feat = working.transpose(1, 2).reshape(b, c, gh, gw)
         self._last_patch_hw = (gh, gw)
         return feat
