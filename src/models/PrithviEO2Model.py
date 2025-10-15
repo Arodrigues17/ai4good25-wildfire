@@ -35,7 +35,7 @@ class PrithviEO2Lightning(BaseModel):
         flatten_temporal_dimension: bool,
         pos_class_weight: float,
         loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice"],
-        freeze_backbone: bool = True,
+        freeze_backbone: bool = False,
         temporal_pooling: Literal["last", "mean", "max", "conv"] = "conv",
         head_hidden_dim: int = 256,
         prithvi_variant: str = "prithvi_eo_v2_300",

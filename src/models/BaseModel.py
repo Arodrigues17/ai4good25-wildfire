@@ -200,7 +200,7 @@ class BaseModel(pl.LightningModule, ABC):
         f1 = self.train_f1(y_hat.detach(), y.detach())
         self.log(
             "train_loss",
-            loss.detach().item(),
+            loss,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
@@ -233,7 +233,7 @@ class BaseModel(pl.LightningModule, ABC):
         f1 = self.val_f1(y_hat.detach(), y.detach())
         self.log(
             "val_loss",
-            loss.detach().item(),
+            loss,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
