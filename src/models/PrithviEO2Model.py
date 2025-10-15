@@ -92,6 +92,17 @@ class PrithviEO2Lightning(BaseModel):
             nn.GELU(),
             nn.Conv2d(head_hidden_dim, 1, kernel_size=1),
         )
+        self._last_patch_hw = None
+
+    def _backbone_grid_size(self) -> Optional[tuple[int, int]]:
+        bb = self.backbone
+        if hasattr(bb, "patch_embed") and hasattr(bb.patch_embed, "grid_size"):
+            gh, gw = bb.patch_embed.grid_size
+            return int(gh), int(gw)
+        if hasattr(bb, "model") and hasattr(bb.model, "patch_embed") and hasattr(bb.model.patch_embed, "grid_size"):
+            gh, gw = bb.model.patch_embed.grid_size
+            return int(gh), int(gw)
+        return None
 
     def _pad_to_patch_size(self, x: torch.Tensor) -> tuple[torch.Tensor, int, int]:
         b, t, c, h, w = x.shape
@@ -140,11 +151,11 @@ class PrithviEO2Lightning(BaseModel):
         return backbone_output
 
     def _select_spatial_feature(self, feature: Any) -> torch.Tensor:
+        if isinstance(feature, dict):
+            feature = self._extract_feature(feature)
         if isinstance(feature, (list, tuple)):
             valid_indices = [idx for idx in self.backbone_indices if idx < len(feature)]
             feature = feature[valid_indices[-1]] if valid_indices else feature[-1]
-        if isinstance(feature, dict):
-            feature = self._extract_feature(feature)
         if not isinstance(feature, torch.Tensor):
             raise RuntimeError("Prithvi backbone did not return tensor features.")
         if feature.dim() == 5:
@@ -153,9 +164,7 @@ class PrithviEO2Lightning(BaseModel):
             elif feature.shape[2] == self.num_frames:
                 feature = feature.permute(0, 2, 1, 3, 4)
             else:
-                raise RuntimeError(
-                    f"Unable to identify temporal dimension for features of shape {tuple(feature.shape)}."
-                )
+                raise RuntimeError(f"Unable to identify temporal dimension for features of shape {tuple(feature.shape)}.")
             feature = self.temporal_projector(feature.contiguous())
         if feature.dim() == 3:
             feature = self._tokens_to_map(feature)
@@ -163,34 +172,49 @@ class PrithviEO2Lightning(BaseModel):
             raise RuntimeError(f"Unexpected feature shape after processing: {feature.shape}")
         return feature
 
-    @staticmethod
-    def _tokens_to_map(tokens: torch.Tensor) -> torch.Tensor:
-        b, n, c = tokens.shape
-        patch_hw = getattr(self, "_last_patch_hw", None)
-        patch_h, patch_w = patch_hw if patch_hw is not None else (None, None)
-        patch_area = None if patch_h is None or patch_w is None else patch_h * patch_w
-        spatial_tokens = tokens
-
-        if patch_area:
-            if spatial_tokens.shape[1] % patch_area != 0 and (spatial_tokens.shape[1] - 1) % patch_area == 0:
-                spatial_tokens = spatial_tokens[:, 1:, :]
-            if spatial_tokens.shape[1] % patch_area == 0:
-                groups = spatial_tokens.shape[1] // patch_area
-                spatial_tokens = spatial_tokens.view(b, groups, patch_area, c)
-                spatial_tokens = spatial_tokens.view(b, groups, patch_h, patch_w, c)
-                spatial_tokens = spatial_tokens.permute(0, 1, 4, 2, 3).contiguous()
+    def _tokens_to_map(self, tokens: torch.Tensor, remove_cls_token: bool = True) -> torch.Tensor:
+        if tokens.dim() != 3:
+            raise ValueError(f"Expected (B, L, C) tokens, got {tuple(tokens.shape)}.")
+        b, seq_len, c = tokens.shape
+        working = tokens
+        grid = self._backbone_grid_size()
+        if grid is not None:
+            gh, gw = grid
+            patch_area = gh * gw
+            if remove_cls_token and seq_len % patch_area != 0 and (seq_len - 1) % patch_area == 0:
+                working = working[:, 1:, :]
+                seq_len -= 1
+            if seq_len % patch_area == 0 and patch_area > 0:
+                groups = seq_len // patch_area
+                reshaped = working.view(b, groups, patch_area, c)
+                reshaped = reshaped.view(b, groups, gh, gw, c).permute(0, 1, 4, 2, 3).contiguous()
+                self._last_patch_hw = (gh, gw)
                 if groups > 1:
-                    return self.temporal_projector(spatial_tokens)
-                return spatial_tokens[:, 0]
-
-        spatial_size = int(math.sqrt(n))
-        if spatial_size * spatial_size != n:
-            spatial_tokens = tokens[:, 1:, :]
-            n = spatial_tokens.shape[1]
-            spatial_size = int(math.sqrt(n))
-            if spatial_size * spatial_size != n:
-                raise RuntimeError(f"Cannot reshape token sequence of length {tokens.shape[1]} into a square grid.")
-        return spatial_tokens.transpose(1, 2).reshape(b, c, spatial_size, spatial_size)
+                    return self.temporal_projector(reshaped)
+                return reshaped[:, 0]
+            inferred = seq_len - (1 if remove_cls_token and seq_len > patch_area else 0)
+            side = int(round(inferred ** 0.5))
+            if side * side != inferred:
+                raise RuntimeError(f"Token count {seq_len} not compatible with grid ({gh},{gw}).")
+            gh = gw = side
+            patch_area = gh * gw
+            if remove_cls_token and seq_len == patch_area + 1:
+                working = working[:, 1:, :]
+                seq_len -= 1
+        else:
+            if remove_cls_token and seq_len > 1:
+                candidate = seq_len - 1
+                side = int(round(candidate ** 0.5))
+                if side * side == candidate:
+                    working = working[:, 1:, :]
+                    seq_len -= 1
+            side = int(round(seq_len ** 0.5))
+            if side * side != seq_len:
+                raise RuntimeError(f"Cannot infer square grid from token length {seq_len}.")
+            gh = gw = side
+        feat = working.transpose(1, 2).reshape(b, c, gh, gw)
+        self._last_patch_hw = (gh, gw)
+        return feat
 
     def forward(self, x: torch.Tensor, doys: Optional[torch.Tensor] = None) -> torch.Tensor:
         if x.ndim == 4:
