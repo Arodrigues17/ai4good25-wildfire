@@ -57,6 +57,26 @@ mamba activate wildfire
 python src/train.py --config=cfgs/unet/res18_monotemporal.yaml --trainer=cfgs/trainer_single_gpu.yaml --data=cfgs/data_monotemporal_full_features.yaml --seed_everything=0 --trainer.max_epochs=5 --do_test=True --data.data_dir /path/to/your/hdf5/dataset
 ```
 
+### 2.4 Using the Prithvi-EO-2.0 backbone
+
+1. Activate `.venv-prithi` and install the extras (e.g. `pip install transformers timm huggingface_hub`).
+2. Point your model config to the new LightningModule:
+
+```yaml
+# filepath: cfgs/prithvi/example.yaml
+model:
+  class_path: models.PrithviEO2Model.PrithviEO2Lightning
+  init_args:
+    loss_function: BCE
+    freeze_backbone: true
+    temporal_pooling: conv
+    head_hidden_dim: 256
+```
+
+3. Launch training as usual, referencing the config above.
+
+> **Wandb storage** – the training script now creates `lightning_logs/wandb`, `.wandb_cache`, `.wandb_config`, and `tmp` automatically. Set `WANDB_DIR`, `WANDB_CACHE_DIR`, `WANDB_CONFIG_DIR`, or `TMPDIR` before launching if you prefer custom locations.
+
 
 ## 3. Objectives and performance metrics 🎯
 

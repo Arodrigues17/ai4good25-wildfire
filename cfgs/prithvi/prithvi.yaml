@@ -1,0 +1,10 @@
+model:
+  class_path: models.PrithviEO2Model.PrithviEO2Lightning
+  init_args:
+    n_channels: 1
+    flatten_temporal_dimension: false
+    pos_class_weight: 1.0
+    loss_function: BCE
+    freeze_backbone: true
+    temporal_pooling: conv
+    head_hidden_dim: 256

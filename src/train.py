@@ -4,6 +4,7 @@ from dataloader.FireSpreadDataModule import FireSpreadDataModule
 from pytorch_lightning.cli import LightningCLI
 from models import SMPModel, BaseModel, ConvLSTMLightning, LogisticRegression  # noqa
 from models import BaseModel
+from models.PrithviEO2Model import PrithviEO2Lightning  # noqa: F401
 import wandb
 import os
 from pathlib import Path
@@ -14,6 +15,16 @@ from dataloader.utils import get_means_stds_missing_values
 
 os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 torch.set_float32_matmul_precision('high')
+
+wandb_paths = {
+    "WANDB_DIR": Path(os.environ.get("WANDB_DIR", Path.cwd() / "lightning_logs" / "wandb")),
+    "WANDB_CACHE_DIR": Path(os.environ.get("WANDB_CACHE_DIR", Path.cwd() / ".wandb_cache")),
+    "WANDB_CONFIG_DIR": Path(os.environ.get("WANDB_CONFIG_DIR", Path.cwd() / ".wandb_config")),
+    "TMPDIR": Path(os.environ.get("TMPDIR", Path.cwd() / "tmp")),
+}
+for env_key, env_path in wandb_paths.items():
+    env_path.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault(env_key, str(env_path.resolve()))
 
 
 class MyLightningCLI(LightningCLI):
