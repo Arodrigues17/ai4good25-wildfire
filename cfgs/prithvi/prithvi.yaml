@@ -8,3 +8,5 @@ model:
     freeze_backbone: true
     temporal_pooling: conv
     head_hidden_dim: 256
+    temporal_pooling: conv
+    head_hidden_dim: 256

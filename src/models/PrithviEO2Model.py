@@ -1,4 +1,5 @@
-from typing import Literal
+from typing import Any, Dict, Literal, Optional
+from transformers import AutoConfig
 
 import torch
 import torch.nn as nn
@@ -46,12 +47,44 @@ class PrithviEO2Lightning(BaseModel):
         head_hidden_dim: int = 256,
         output_dropout: float = 0.1,
         trust_remote_code: bool = True,
+        backbone_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> None:
-        self.backbone = AutoModel.from_pretrained(
-            prithvi_model_name,
-            trust_remote_code=trust_remote_code,
+        self.backbone_kwargs = {} if backbone_kwargs is None else dict(backbone_kwargs)
+        self.backbone_kwargs.setdefault("num_labels", 1)
+        self.backbone_checkpoint = prithvi_model_name
+        self.trust_remote_code = trust_remote_code
+        config_init_kwargs = {"num_labels": self.backbone_kwargs["num_labels"]}
+
+        self.backbone_config = AutoConfig.from_pretrained(
+            self.backbone_checkpoint,
+            trust_remote_code=self.trust_remote_code,
+            **config_init_kwargs,
         )
+        if getattr(self.backbone_config, "num_labels", None) in (None, 0):
+            self.backbone_config.num_labels = self.backbone_kwargs["num_labels"]
+            self.backbone_config.id2label = {
+                i: f"LABEL_{i}" for i in range(self.backbone_config.num_labels)
+            }
+            self.backbone_config.label2id = {
+                v: k for k, v in self.backbone_config.id2label.items()
+            }
+        try:
+            self.backbone = AutoModel.from_pretrained(
+                self.backbone_checkpoint,
+                config=self.backbone_config,
+                trust_remote_code=self.trust_remote_code,
+                **{k: v for k, v in self.backbone_kwargs.items() if k != "num_labels"},
+            )
+        except OSError as err:
+            missing_weights = "does not appear to have a file named" in str(err)
+            if missing_weights:
+                raise RuntimeError(
+                    f"Failed to download weights for '{self.backbone_checkpoint}'. "
+                    "Ensure you have accepted the model license and that a valid Hugging Face token "
+                    "is available (e.g., run `huggingface-cli login`)."
+                ) from err
+            raise
         image_size = getattr(self.backbone.config, "image_size", None)
         required_size = (
             (image_size, image_size)
