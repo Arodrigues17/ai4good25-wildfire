@@ -97,7 +97,6 @@ class PrithviEO2Lightning(BaseModel):
 
     def _forward_backbone(self, x: torch.Tensor):
         runners = (
-            lambda: self.backbone({"pixel_values": x}),
             lambda: self.backbone(pixel_values=x),
             lambda: self.backbone(x),
         )
@@ -219,4 +218,5 @@ class PrithviEO2Lightning(BaseModel):
         if not param_groups:
             raise RuntimeError("No trainable parameters available for optimization.")
 
+        return torch.optim.AdamW(param_groups, weight_decay=weight_decay)
         return torch.optim.AdamW(param_groups, weight_decay=weight_decay)

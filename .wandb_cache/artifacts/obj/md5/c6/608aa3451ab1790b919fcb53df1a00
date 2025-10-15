@@ -1,0 +1,73 @@
+{
+    "_version": "v0",
+    "source_type": "repo",
+    "source": {
+        "entrypoint": [
+            "python",
+            "src/train.py"
+        ],
+        "git": {
+            "remote": "git@github.com:Arodrigues17/ai4good25-wildfire.git",
+            "commit": "48378c5b6f8055c259afa9b228ec560b7e1cff50"
+        }
+    },
+    "input_types": {
+        "wb_type": "typedDict",
+        "params": {
+            "type_map": {
+                "unique_tag": {
+                    "wb_type": "string"
+                },
+                "n_channels": {
+                    "wb_type": "number"
+                },
+                "flatten_temporal_dimension": {
+                    "wb_type": "boolean"
+                },
+                "pos_class_weight": {
+                    "wb_type": "number"
+                },
+                "loss_function": {
+                    "wb_type": "string"
+                },
+                "use_doy": {
+                    "wb_type": "boolean"
+                },
+                "required_img_size": {
+                    "wb_type": "none"
+                },
+                "freeze_backbone": {
+                    "wb_type": "boolean"
+                },
+                "temporal_pooling": {
+                    "wb_type": "string"
+                },
+                "head_hidden_dim": {
+                    "wb_type": "number"
+                },
+                "prithvi_variant": {
+                    "wb_type": "string"
+                },
+                "num_frames": {
+                    "wb_type": "number"
+                },
+                "backbone_indices": {
+                    "wb_type": "list",
+                    "params": {
+                        "element_type": {
+                            "wb_type": "number"
+                        },
+                        "length": 4
+                    }
+                }
+            }
+        }
+    },
+    "output_types": {
+        "wb_type": "typedDict",
+        "params": {
+            "type_map": {}
+        }
+    },
+    "runtime": "3.10.14"
+}
