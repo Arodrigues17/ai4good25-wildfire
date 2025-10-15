@@ -1,13 +1,10 @@
 model:
   class_path: models.PrithviEO2Model.PrithviEO2Lightning
   init_args:
-    n_channels: 0            # overwritten by LightningCLI before instantiation
-    flatten_temporal_dimension: false
-    pos_class_weight: 1.0    # overwritten with fold-specific value
     loss_function: BCE
     freeze_backbone: true
     temporal_pooling: conv
     head_hidden_dim: 256
     prithvi_variant: "prithvi_eo_v2_300"
-    num_frames: 5
+    num_frames: 5  # For 5-day history
     backbone_indices: [5, 11, 17, 23]

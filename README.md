@@ -59,11 +59,56 @@ python src/train.py --config=cfgs/unet/res18_monotemporal.yaml --trainer=cfgs/tr
 
 ### 2.4 Using the Prithvi-EO-2.0 backbone
 
-1. Activate `.venv-prithi` and install the extras (e.g. `pip install transformers timm huggingface_hub`).
-2. Point your model config to the new LightningModule:
+**Important**: Prithvi requires specific dependency versions. Create a separate virtual environment for Prithvi experiments to avoid conflicts.
+
+#### Setup Instructions
+
+1. **Create and activate a new environment:**
+```bash
+mamba create -n wildfire-prithvi python=3.10.4
+mamba activate wildfire-prithvi
+```
+
+2. **Install base PyTorch and dependencies:**
+```bash
+pip install torch==2.0.0 torchvision==0.15.1
+pip install pytorch-lightning==2.0.1.post0 torchmetrics==0.11.4
+```
+
+3. **Install compatible wandb and protobuf (IMPORTANT - install these together):**
+```bash
+pip install "wandb==0.15.3" "protobuf>=3.19.0,<4.0.0"
+```
+
+4. **Install NumPy and OpenCV with version constraints:**
+```bash
+pip install "numpy>=1.22.3,<2.0" "opencv-python-headless>=4.7.0,<4.10"
+```
+
+5. **Install Prithvi and other dependencies:**
+```bash
+pip install terratorch transformers timm huggingface_hub
+pip install segmentation-models-pytorch==0.3.2 h5py==3.8.0 rasterio==1.3.6 scikit-learn==1.2.2 matplotlib==3.7.1
+```
+
+6. **Verify installation:**
+```bash
+python -c "import torch; import pytorch_lightning; import terratorch; import wandb; import numpy; print('Environment ready!'); print(f'NumPy: {numpy.__version__}'); print(f'wandb: {wandb.__version__}')"
+```
+
+Expected output:
+```
+Environment ready!
+NumPy: 1.26.4
+wandb: 0.15.3
+```
+
+#### Configuration
+
+Point your model config to the Prithvi LightningModule:
 
 ```yaml
-# filepath: cfgs/prithvi/example.yaml
+# filepath: cfgs/prithvi/prithvi.yaml
 model:
   class_path: models.PrithviEO2Model.PrithviEO2Lightning
   init_args:
@@ -71,11 +116,44 @@ model:
     freeze_backbone: true
     temporal_pooling: conv
     head_hidden_dim: 256
+    prithvi_variant: "prithvi_eo_v2_300"
+    num_frames: 5  # Match to n_leading_observations in data config
+    backbone_indices: [5, 11, 17, 23]  # Feature extraction layers for 300M model
 ```
 
-3. Launch training as usual, referencing the config above.
+#### Training
 
-> **Wandb storage** – the training script now creates `lightning_logs/wandb`, `.wandb_cache`, `.wandb_config`, and `tmp` automatically. Set `WANDB_DIR`, `WANDB_CACHE_DIR`, `WANDB_CONFIG_DIR`, or `TMPDIR` before launching if you prefer custom locations.
+Launch training with:
+```bash
+mamba activate wildfire-prithvi
+python src/train.py \
+  --config=cfgs/prithvi/prithvi.yaml \
+  --trainer=cfgs/trainer_single_gpu.yaml \
+  --data=cfgs/data_multitemporal_full_features_doys.yaml \
+  --data.batch_size=8 \
+  --data.load_from_hdf5=true \
+  --data.data_dir=../data/hdf5/wildfire \
+  --model.init_args.num_frames=5 \
+  --do_train=true \
+  --do_test=true
+```
+
+#### Troubleshooting
+
+**NumPy compatibility error** (`_ARRAY_API not found`):
+```bash
+pip install "numpy>=1.22.3,<2.0" "opencv-python-headless>=4.7.0,<4.10"
+```
+
+**Wandb protobuf error** (`module 'wandb.proto.wandb_internal_pb2' has no attribute 'Result'`):
+```bash
+pip uninstall -y wandb protobuf
+pip install "wandb==0.15.3" "protobuf>=3.19.0,<4.0.0"
+```
+
+**Dependency conflict warnings**: You may see warnings about `databricks-sdk` and `opentelemetry-proto` requiring newer protobuf versions. These are optional dependencies from `terratorch` and can be safely ignored as they don't affect model training.
+
+> **Wandb storage** – the training script creates `lightning_logs/wandb`, `.wandb_cache`, `.wandb_config`, and `tmp` automatically. Set `WANDB_DIR`, `WANDB_CACHE_DIR`, `WANDB_CONFIG_DIR`, or `TMPDIR` before launching if you prefer custom locations.
 
 
 ## 3. Objectives and performance metrics 🎯

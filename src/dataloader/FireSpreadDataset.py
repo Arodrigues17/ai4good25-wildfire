@@ -68,6 +68,12 @@ class FireSpreadDataset(Dataset):
         self.datapoints_per_fire = self.compute_datapoints_per_fire()
         self.length = sum([sum(self.datapoints_per_fire[fire_year].values())
                           for fire_year in self.datapoints_per_fire])
+        if self.length == 0:
+            raise RuntimeError(
+                f"No samples found in '{self.data_dir}' for years {self.included_fire_years} "
+                f"(load_from_hdf5={self.load_from_hdf5}). Verify the HDF5 conversion and that each fire "
+                f"provides more than {self.n_leading_observations} frames."
+            )
 
         # Used in preprocessing and normalization. Better to define it once than build/call for every data point
         # The one-hot matrix is used for one-hot encoding of land cover classes
@@ -235,12 +241,25 @@ class FireSpreadDataset(Dataset):
                         warnings.warn(f"In dataset preparation: Fire {fire_year}: {fire_name} contains no images.",
                                       RuntimeWarning)
             else:
-                fires_in_year = glob.glob(
-                    f"{self.data_dir}/{fire_year}/*.hdf5")
-                fires_in_year.sort()
-                for fire_hdf5 in fires_in_year:
-                    fire_name = Path(fire_hdf5).stem
-                    imgs_per_fire[fire_year][fire_name] = [fire_hdf5]
+                year_dir = Path(self.data_dir) / str(fire_year)
+                if not year_dir.exists():
+                    warnings.warn(
+                        f"In dataset preparation: Directory '{year_dir}' does not exist.", RuntimeWarning)
+                    continue
+                hdf5_files = {
+                    path for pattern in ("*.hdf5", "*.h5", "*.HDF5", "*.H5")
+                    for path in year_dir.glob(pattern)
+                    if path.is_file()
+                }
+                if not hdf5_files:
+                    warnings.warn(
+                        f"In dataset preparation: Fire {fire_year} contains no HDF5 files in '{year_dir}'.",
+                        RuntimeWarning,
+                    )
+                    continue
+                for fire_hdf5 in sorted(hdf5_files):
+                    fire_name = fire_hdf5.stem
+                    imgs_per_fire[fire_year][fire_name] = [str(fire_hdf5)]
 
         return imgs_per_fire
 
