@@ -75,6 +75,14 @@ class PrithviEO2Lightning(BaseModel):
         self.patch_size = getattr(self.backbone, "patch_size", 16)
         if isinstance(self.patch_size, (tuple, list)):
             self.patch_size = int(self.patch_size[0])
+        patch_embed = getattr(self.backbone, "patch_embed", None)
+        proj = getattr(patch_embed, "proj", None) if patch_embed is not None else None
+        self.backbone_in_channels = int(getattr(proj, "in_channels", n_channels))
+        self.input_adapter = (
+            nn.Conv3d(n_channels, self.backbone_in_channels, kernel_size=1)
+            if self.backbone_in_channels != n_channels
+            else nn.Identity()
+        )
         self.temporal_projector = TemporalProjector(self.backbone_dim, mode=temporal_pooling)
         self.channel_adapter = nn.LazyConv2d(self.backbone_dim, kernel_size=1)
         self.decoder = nn.Sequential(
@@ -140,7 +148,15 @@ class PrithviEO2Lightning(BaseModel):
         if not isinstance(feature, torch.Tensor):
             raise RuntimeError("Prithvi backbone did not return tensor features.")
         if feature.dim() == 5:
-            feature = self.temporal_projector(feature)
+            if feature.shape[1] == self.num_frames:
+                pass
+            elif feature.shape[2] == self.num_frames:
+                feature = feature.permute(0, 2, 1, 3, 4)
+            else:
+                raise RuntimeError(
+                    f"Unable to identify temporal dimension for features of shape {tuple(feature.shape)}."
+                )
+            feature = self.temporal_projector(feature.contiguous())
         if feature.dim() == 3:
             feature = self._tokens_to_map(feature)
         if feature.dim() != 4:
@@ -150,7 +166,23 @@ class PrithviEO2Lightning(BaseModel):
     @staticmethod
     def _tokens_to_map(tokens: torch.Tensor) -> torch.Tensor:
         b, n, c = tokens.shape
+        patch_hw = getattr(self, "_last_patch_hw", None)
+        patch_h, patch_w = patch_hw if patch_hw is not None else (None, None)
+        patch_area = None if patch_h is None or patch_w is None else patch_h * patch_w
         spatial_tokens = tokens
+
+        if patch_area:
+            if spatial_tokens.shape[1] % patch_area != 0 and (spatial_tokens.shape[1] - 1) % patch_area == 0:
+                spatial_tokens = spatial_tokens[:, 1:, :]
+            if spatial_tokens.shape[1] % patch_area == 0:
+                groups = spatial_tokens.shape[1] // patch_area
+                spatial_tokens = spatial_tokens.view(b, groups, patch_area, c)
+                spatial_tokens = spatial_tokens.view(b, groups, patch_h, patch_w, c)
+                spatial_tokens = spatial_tokens.permute(0, 1, 4, 2, 3).contiguous()
+                if groups > 1:
+                    return self.temporal_projector(spatial_tokens)
+                return spatial_tokens[:, 0]
+
         spatial_size = int(math.sqrt(n))
         if spatial_size * spatial_size != n:
             spatial_tokens = tokens[:, 1:, :]
@@ -158,7 +190,6 @@ class PrithviEO2Lightning(BaseModel):
             spatial_size = int(math.sqrt(n))
             if spatial_size * spatial_size != n:
                 raise RuntimeError(f"Cannot reshape token sequence of length {tokens.shape[1]} into a square grid.")
-        spatial_tokens = spatial_tokens[:, : spatial_size * spatial_size, :]
         return spatial_tokens.transpose(1, 2).reshape(b, c, spatial_size, spatial_size)
 
     def forward(self, x: torch.Tensor, doys: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -168,7 +199,10 @@ class PrithviEO2Lightning(BaseModel):
         orig_h, orig_w = x.shape[-2], x.shape[-1]
         x, pad_h, pad_w = self._pad_to_patch_size(x)
         padded_h, padded_w = x.shape[-2], x.shape[-1]
-        backbone_output = self._forward_backbone(x)
+        self._last_patch_hw = (padded_h // self.patch_size, padded_w // self.patch_size)
+        x_backbone = x.permute(0, 2, 1, 3, 4).contiguous()
+        x_backbone = self.input_adapter(x_backbone)
+        backbone_output = self._forward_backbone(x_backbone)
         feature = self._extract_feature(backbone_output)
         feature = self._select_spatial_feature(feature)
         if feature.shape[1] != self.backbone_dim:
@@ -177,6 +211,7 @@ class PrithviEO2Lightning(BaseModel):
         logits = F.interpolate(logits, size=(padded_h, padded_w), mode="bilinear", align_corners=False)
         if pad_h or pad_w:
             logits = logits[:, :, :orig_h, :orig_w]
+        self._last_patch_hw = None
         return logits
 
     def configure_optimizers(self):
@@ -218,5 +253,4 @@ class PrithviEO2Lightning(BaseModel):
         if not param_groups:
             raise RuntimeError("No trainable parameters available for optimization.")
 
-        return torch.optim.AdamW(param_groups, weight_decay=weight_decay)
         return torch.optim.AdamW(param_groups, weight_decay=weight_decay)
