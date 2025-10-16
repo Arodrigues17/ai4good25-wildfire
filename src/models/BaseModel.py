@@ -65,6 +65,7 @@ class BaseModel(pl.LightningModule, ABC):
         self.conf_mat = torchmetrics.ConfusionMatrix("binary")
 
         self.test_metrics = MyTestMetrics()
+        self.pred_threshold = 0.5
 
     def forward(self, x, doys=None):
         # If doys are used, the model needs to re-implement the forward method
@@ -184,6 +185,12 @@ class BaseModel(pl.LightningModule, ABC):
         y_hat = _call_forward(x).squeeze(1)
         return y_hat, y
 
+    def _prepare_predictions(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        preds = torch.sigmoid(logits.detach()) >= self.pred_threshold
+        while preds.ndim > target.ndim:
+            preds = preds.squeeze(1)
+        return preds
+
     def training_step(self, batch, batch_idx):
         """_summary_ Compute predictions and loss for the given batch. Log training loss and F1 score.
 
@@ -197,7 +204,9 @@ class BaseModel(pl.LightningModule, ABC):
         y_hat, y = self.get_pred_and_gt(batch)
 
         loss = self.compute_loss(y_hat, y)
-        f1 = self.train_f1(y_hat.detach(), y.detach())
+        preds = self._prepare_predictions(y_hat, y).long()
+        target = y.detach().long()
+        self.train_f1(preds, target)
         self.log(
             "train_loss",
             loss,
@@ -230,7 +239,9 @@ class BaseModel(pl.LightningModule, ABC):
         y_hat, y = self.get_pred_and_gt(batch)
 
         loss = self.compute_loss(y_hat, y)
-        f1 = self.val_f1(y_hat.detach(), y.detach())
+        preds = self._prepare_predictions(y_hat, y).long()
+        target = y.detach().long()
+        self.val_f1(preds, target)
         self.log(
             "val_loss",
             loss,
@@ -265,9 +276,11 @@ class BaseModel(pl.LightningModule, ABC):
         y = y.detach()      
 
         loss = self.compute_loss(y_hat, y)
-        self.test_f1(y_hat, y)
+        preds = self._prepare_predictions(y_hat, y).long()
+        target = y.detach().long()
+        self.test_f1(preds, target)
         self.test_metrics.update(y_hat, y)
-        self.conf_mat.update(y_hat, y)
+        self.conf_mat.update(preds, target)
 
         self.log("test_loss", loss.detach().item(), sync_dist=True)
         self.log_dict(

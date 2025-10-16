@@ -8,3 +8,8 @@ model:
     prithvi_variant: "prithvi_eo_v2_300"
     num_frames: 5  # For 5-day history
     backbone_indices: [5, 11, 17, 23]
+
+
+do_train: true
+do_test: true
+do_predict: false

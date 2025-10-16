@@ -63,8 +63,9 @@ class MyLightningCLI(LightningCLI):
         train_years, _, _ = FireSpreadDataModule.split_fires(
             self.config.data.data_fold_id)
         _, _, missing_values_rates = get_means_stds_missing_values(train_years)
-        fire_rate = 1 - missing_values_rates[-1]
-        pos_class_weight = float(1 / fire_rate)
+        fire_rate = max(1e-6, float(1 - missing_values_rates[-1]))
+        neg_rate = max(1e-6, 1 - fire_rate)
+        pos_class_weight = float(neg_rate / fire_rate)
 
         self.config.model.init_args.pos_class_weight = pos_class_weight
 

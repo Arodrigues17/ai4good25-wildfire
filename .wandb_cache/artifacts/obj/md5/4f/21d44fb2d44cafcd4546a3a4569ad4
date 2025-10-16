@@ -1,0 +1,31 @@
+{
+    "_version": "v0",
+    "source_type": "repo",
+    "source": {
+        "entrypoint": [
+            "python",
+            "src/train.py"
+        ],
+        "git": {
+            "remote": "git@github.com:Arodrigues17/ai4good25-wildfire.git",
+            "commit": "7bc49f9a3d8456003eecfb701e337d3842ed952b"
+        }
+    },
+    "input_types": {
+        "wb_type": "typedDict",
+        "params": {
+            "type_map": {
+                "unique_tag": {
+                    "wb_type": "string"
+                }
+            }
+        }
+    },
+    "output_types": {
+        "wb_type": "typedDict",
+        "params": {
+            "type_map": {}
+        }
+    },
+    "runtime": "3.10.14"
+}
