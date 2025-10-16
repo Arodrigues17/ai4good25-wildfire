@@ -16,7 +16,7 @@ model:
 
     # actual Prithvi args you care about
     loss_function: BCE
-    freeze_backbone: true
+    freeze_backbone: false
     temporal_pooling: conv
     head_hidden_dim: 256
     prithvi_variant: "prithvi_eo_v2_300"

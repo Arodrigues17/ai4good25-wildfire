@@ -15,6 +15,9 @@ from dataloader.utils import get_means_stds_missing_values
 
 os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 torch.set_float32_matmul_precision('high')
+import torch.multiprocessing as mp
+if mp.get_start_method(allow_none=True) != "spawn":
+    mp.set_start_method("spawn", force=True)
 
 wandb_paths = {
     "WANDB_DIR": Path(os.environ.get("WANDB_DIR", Path.cwd() / "lightning_logs" / "wandb")),
