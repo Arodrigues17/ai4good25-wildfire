@@ -182,13 +182,20 @@ class MultiScaleConvLSTM(nn.Module):
             ]
         )
 
-        # Feature fusion after pyramid pooling
-        pyramid_channels = input_dim * len(pyramid_scales)
-        self.pyramid_fusion = nn.Sequential(
-            nn.Conv2d(pyramid_channels, input_dim, 3, padding=1, bias=False),
-            nn.BatchNorm2d(input_dim),
-            nn.ReLU(inplace=True),
-        )
+        # Feature fusion after pyramid pooling - one for each layer
+        self.pyramid_fusions = nn.ModuleList()
+        for i in range(num_layers):
+            cur_input_dim = input_dim if i == 0 else self.hidden_dims[i - 1]
+            pyramid_channels = cur_input_dim * len(pyramid_scales)
+            self.pyramid_fusions.append(
+                nn.Sequential(
+                    nn.Conv2d(
+                        pyramid_channels, cur_input_dim, 3, padding=1, bias=False
+                    ),
+                    nn.BatchNorm2d(cur_input_dim),
+                    nn.ReLU(inplace=True),
+                )
+            )
 
         # Build ConvLSTM layers
         cell_list = []
@@ -244,7 +251,7 @@ class MultiScaleConvLSTM(nn.Module):
 
                 # Fuse pyramid features
                 pyramid_concat = torch.cat(pyramid_features, dim=1)
-                fused_input = self.pyramid_fusion(pyramid_concat)
+                fused_input = self.pyramid_fusions[layer_idx](pyramid_concat)
 
                 h, c = self.cell_list[layer_idx](fused_input, [h, c])
                 output_inner.append(h)
