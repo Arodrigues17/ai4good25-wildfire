@@ -499,7 +499,7 @@ class ConvLSTM_Guillermo_v1(BaseModel):
         gt = gt.float()
 
         # Main loss
-        main_loss = self.loss(pred, gt)
+        main_loss = self.compute_loss(pred, gt)
 
         # Check if we have deep supervision prediction
         if hasattr(self, "_deep_sup_pred") and self._deep_sup_pred is not None:
@@ -507,7 +507,7 @@ class ConvLSTM_Guillermo_v1(BaseModel):
             deep_sup_pred = self._deep_sup_pred.float()
 
             # Deep supervision loss
-            deep_sup_loss = self.loss(deep_sup_pred, gt)
+            deep_sup_loss = self.compute_loss(deep_sup_pred, gt)
 
             # Combined loss
             total_loss = main_loss + self.deep_supervision_weight * deep_sup_loss
