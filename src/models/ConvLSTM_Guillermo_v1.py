@@ -229,12 +229,16 @@ class MultiScaleConvLSTM(nn.Module):
             for t in range(seq_len):
                 # Apply multi-scale pyramid pooling
                 current_input = cur_layer_input[:, t, :, :, :]
+                _, _, spatial_h, spatial_w = current_input.shape
                 pyramid_features = []
 
                 for pool in self.pyramid_pools:
                     pooled = pool(current_input)
                     upsampled = F.interpolate(
-                        pooled, size=(h, w), mode="bilinear", align_corners=False
+                        pooled,
+                        size=(spatial_h, spatial_w),
+                        mode="bilinear",
+                        align_corners=False,
                     )
                     pyramid_features.append(upsampled)
 
