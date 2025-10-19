@@ -1,89 +1,27 @@
+# pytorch_lightning==2.0.1
 # Configuration file for ConvLSTM_Guillermo_v1
-# Save this as convlstm_guillermo_v1_config.yaml
-
+seed_everything: 0
+optimizer: 
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.001
 model:
-  class_path: models.ConvLSTM_Guillermo_v1
+  class_path: ConvLSTM_Guillermo_v1
   init_args:
-    # Basic model parameters
-    flatten_temporal_dimension: false  # ConvLSTM needs temporal dimension
-    loss_function: "Focal"  # or "BCE", "Lovasz", "Jaccard", "Dice"
-    
-    # Model architecture parameters
-    img_height_width: [64, 64]  # Fixed size required for ConvLSTM
-    kernel_sizes: [[3, 3], [3, 3], [3, 3]]  # Kernel size for each layer
-    hidden_dims: [64, 128, 256]  # Hidden dimensions for each layer
-    num_layers: 3  # Number of ConvLSTM layers
-    
-    # Advanced features
-    pyramid_scales: [1, 2, 4]  # Multi-scale pyramid pooling scales
-    use_attention: true  # Enable spatial attention mechanism
-    use_residual: true  # Enable residual connections
-    dropout_rate: 0.1  # Dropout rate for regularization
-    deep_supervision_weight: 0.3  # Weight for deep supervision loss
-    
-    # Training parameters
-    learning_rate: 0.001
-    weight_decay: 0.0001
-    
-    # Data-specific parameters (will be set automatically)
-    n_channels: null  # Set automatically based on data
-    pos_class_weight: null  # Set automatically based on data balance
+    n_channels: 40
+    flatten_temporal_dimension: false
+    pos_class_weight: 236 # (relative frequency in augmented 2018 and 2020 fires)^-1
+    loss_function: "Focal"
+    img_height_width: [128, 128]
+    kernel_sizes: [[3, 3], [3, 3], [3, 3]]
+    hidden_dims: [64, 128, 256]
+    num_layers: 3
+    pyramid_scales: [1, 2, 4]
+    use_attention: true
+    use_residual: true
+    dropout_rate: 0.1
+    deep_supervision_weight: 0.3
 
-data:
-  class_path: dataloader.FireSpreadDataModule
-  init_args:
-    data_dir: "path/to/your/data"  # Update with your data path
-    batch_size: 8  # Adjust based on your GPU memory
-    n_leading_observations: 7  # Number of time steps to use as input
-    n_leading_observations_test_adjustment: 0
-    crop_side_length: 64  # Must match img_height_width
-    load_from_hdf5: true  # Use HDF5 format for faster loading
-    num_workers: 4  # Number of data loading workers
-    remove_duplicate_features: false
-    features_to_keep: null  # Use all features
-    return_doy: false  # Day of year feature
-    data_fold_id: 0  # Data fold for cross-validation
-
-trainer:
-  accelerator: "gpu"  # Use "cpu" if no GPU available
-  devices: 1
-  max_epochs: 100
-  precision: 16  # Mixed precision training for speed
-  
-  # Checkpointing
-  callbacks:
-    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
-      init_args:
-        monitor: "val_f1"
-        mode: "max"
-        save_top_k: 3
-        filename: "convlstm_guillermo_v1_{epoch:02d}_{val_f1:.3f}"
-    
-    # Early stopping
-    - class_path: pytorch_lightning.callbacks.EarlyStopping
-      init_args:
-        monitor: "val_f1"
-        mode: "max"
-        patience: 15
-        min_delta: 0.001
-  
-  # Logging
-  logger:
-    class_path: pytorch_lightning.loggers.WandbLogger
-    init_args:
-      project: "wildfire_prediction"
-      name: "ConvLSTM_Guillermo_v1"
-      save_dir: "./logs"
-  
-  # Learning rate scheduling
-  lr_scheduler:
-    scheduler:
-      class_path: torch.optim.lr_scheduler.ReduceLROnPlateau
-      init_args:
-        mode: "max"
-        factor: 0.5
-        patience: 10
-        min_lr: 1e-6
-    monitor: "val_f1"
-    interval: "epoch"
-    frequency: 1
+do_train: true
+do_test: true
+do_predict: false

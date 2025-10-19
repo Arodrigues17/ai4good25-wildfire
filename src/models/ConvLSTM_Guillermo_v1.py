@@ -377,6 +377,7 @@ class ConvLSTM_Guillermo_v1(BaseModel):
         n_channels: int,
         flatten_temporal_dimension: bool,
         pos_class_weight: float,
+        loss_function: str,
         img_height_width: Tuple[int, int],
         kernel_sizes: List[Tuple[int, int]] = None,
         hidden_dims: List[int] = None,
@@ -393,6 +394,7 @@ class ConvLSTM_Guillermo_v1(BaseModel):
             n_channels=n_channels,
             flatten_temporal_dimension=flatten_temporal_dimension,
             pos_class_weight=pos_class_weight,
+            loss_function=loss_function,
             required_img_size=img_height_width,
             *args,
             **kwargs
