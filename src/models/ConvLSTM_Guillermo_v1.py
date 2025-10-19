@@ -464,18 +464,43 @@ class ConvLSTM_Guillermo_v1(BaseModel):
         else:
             return main_output
 
+    def get_pred_and_gt(self, batch):
+        """Override to handle tuple output during training."""
+        # UTAE and TSViT use an additional doy feature as input.
+        if self.hparams.use_doy:
+            x, y, doys = batch
+        else:
+            x, y = batch
+            doys = None
+
+        # Get model prediction
+        output = self(x, doys)
+
+        # Handle tuple output during training
+        if isinstance(output, tuple):
+            main_pred, deep_sup_pred = output
+            # Store deep supervision prediction for use in training_step
+            self._deep_sup_pred = (
+                deep_sup_pred.squeeze(1) if deep_sup_pred.dim() > 3 else deep_sup_pred
+            )
+            y_hat = main_pred.squeeze(1) if main_pred.dim() > 3 else main_pred
+        else:
+            y_hat = output.squeeze(1) if output.dim() > 3 else output
+            self._deep_sup_pred = None
+
+        return y_hat, y
+
     def training_step(self, batch, batch_idx):
         """Training step with deep supervision."""
         pred, gt = self.get_pred_and_gt(batch)
 
-        if isinstance(pred, tuple):
-            main_pred, deep_sup_pred = pred
+        # Main loss
+        main_loss = self.loss(pred, gt)
 
-            # Main loss
-            main_loss = self.loss(main_pred, gt)
-
+        # Check if we have deep supervision prediction
+        if hasattr(self, "_deep_sup_pred") and self._deep_sup_pred is not None:
             # Deep supervision loss
-            deep_sup_loss = self.loss(deep_sup_pred, gt)
+            deep_sup_loss = self.loss(self._deep_sup_pred, gt)
 
             # Combined loss
             total_loss = main_loss + self.deep_supervision_weight * deep_sup_loss
@@ -492,11 +517,8 @@ class ConvLSTM_Guillermo_v1(BaseModel):
                 on_epoch=True,
                 prog_bar=True,
             )
-
-            # Use main prediction for metrics
-            pred = main_pred
         else:
-            total_loss = self.loss(pred, gt)
+            total_loss = main_loss
             self.log(
                 "train/loss", total_loss, on_step=True, on_epoch=True, prog_bar=True
             )
