@@ -4,6 +4,9 @@ from pathlib import Path
 
 import torch
 import wandb
+from pytorch_lightning.cli import LightningCLI
+from pytorch_lightning.utilities import rank_zero_only
+
 from dataloader.FireSpreadDataModule import FireSpreadDataModule
 from dataloader.FireSpreadDataset import FireSpreadDataset
 from dataloader.utils import get_means_stds_missing_values
@@ -14,8 +17,6 @@ from models import (  # noqa
     LogisticRegression,
     SMPModel,
 )
-from pytorch_lightning.cli import LightningCLI
-from pytorch_lightning.utilities import rank_zero_only
 
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 torch.set_float32_matmul_precision("high")
@@ -98,6 +99,10 @@ class MyLightningCLI(LightningCLI):
         Also define min and max metrics in wandb, because otherwise it just reports the
         last known values, which is not what we want.
         """
+        # Check if wandb run is initialized
+        if wandb.run is None:
+            return
+
         config_file_name = os.path.join(wandb.run.dir, "cli_config.yaml")
 
         cfg_string = self.parser.dump(self.config, skip_none=False)
@@ -108,6 +113,9 @@ class MyLightningCLI(LightningCLI):
         wandb.define_metric("val_loss", summary="min")
         wandb.define_metric("train_f1_epoch", summary="max")
         wandb.define_metric("val_f1", summary="max")
+        # Add the new AP metrics
+        wandb.define_metric("train/ap", summary="max")
+        wandb.define_metric("val_ap", summary="max")
 
         unique_tag = self.config.unique_tag
         if (
