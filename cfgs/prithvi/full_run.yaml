@@ -19,11 +19,11 @@ model:
     freeze_backbone: false
     temporal_pooling: conv
     head_hidden_dim: 256
-    prithvi_variant: "prithvi_eo_v1_100"
-    #prithvi_variant: "prithvi_eo_v2_300"
+    #prithvi_variant: "prithvi_eo_v1_100"
+    prithvi_variant: "prithvi_eo_v2_300"
     num_frames: 5
-    backbone_indices: [2, 5, 8, 11]  # for tiny & 100M
-    #backbone_indices: [5, 11, 17, 23] #these kind of seem arbitrary, but correspond to the end of each stage in the ViT
+    #backbone_indices: [2, 5, 8, 11]  # for tiny & 100M
+    backbone_indices: [5, 11, 17, 23] #these kind of seem arbitrary, but correspond to the end of each stage in the ViT
 
 
 do_train: true
