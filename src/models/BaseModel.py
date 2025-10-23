@@ -2,23 +2,24 @@ import math
 from abc import ABC
 from typing import Any, Literal, Optional, Tuple
 
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torchmetrics
 import wandb
-import matplotlib.pyplot as plt
-from segmentation_models_pytorch.losses import (DiceLoss, JaccardLoss,
-                                                LovaszLoss)
-
+from segmentation_models_pytorch.losses import DiceLoss, JaccardLoss, LovaszLoss
 from torchvision.ops import sigmoid_focal_loss
+
 from .EvaluationMetrics import MyTestMetrics
 
+
 class BaseModel(pl.LightningModule, ABC):
-    """_summary_ Base model class for all models in this project. Implements the training, validation and test steps, 
-    as well as the loss function. 
+    """_summary_ Base model class for all models in this project. Implements the training, validation and test steps,
+    as well as the loss function.
 
     """
+
     def __init__(
         self,
         n_channels: int,
@@ -30,19 +31,19 @@ class BaseModel(pl.LightningModule, ABC):
         *args: Any,
         **kwargs: Any
     ):
-        """_summary_ 
+        """_summary_
 
         Args:
-            n_channels (int): _description_ Number of feature channels in the input data. Usually means number of features per time step, 
-            except for U-Net which flattens the temporal dimension and uses this parameter as the total number of features. 
+            n_channels (int): _description_ Number of feature channels in the input data. Usually means number of features per time step,
+            except for U-Net which flattens the temporal dimension and uses this parameter as the total number of features.
             flatten_temporal_dimension (bool): _description_ Whether to flatten the temporal dimension of the input data.
             pos_class_weight (float): _description_ Weight of the positive class in the loss function (only used for BCE and Focal loss).
-            loss_function (Literal[&#39;BCE&#39;, &#39;Focal&#39;, &#39;Lovasz&#39;, &#39;Jaccard&#39;, &#39;Dice&#39;]): _description_ Which loss function to use. 
+            loss_function (Literal[&#39;BCE&#39;, &#39;Focal&#39;, &#39;Lovasz&#39;, &#39;Jaccard&#39;, &#39;Dice&#39;]): _description_ Which loss function to use.
             use_doy (bool, optional): _description_. Whether to use the doy of year (doy) as an additional input feature. Defaults to False.
-            required_img_size (Optional[Tuple[int,int]], optional): _description_. Defaults to None. 
-            When using a model that requires a specific image size, this parameter can be used to indicate it. We assume models require square images, 
-            so this parameter indicates the side length. If set, the forward method will perform repeated inference on crops of the 
-            image, and aggregate the results. This also works for non-square images. 
+            required_img_size (Optional[Tuple[int,int]], optional): _description_. Defaults to None.
+            When using a model that requires a specific image size, this parameter can be used to indicate it. We assume models require square images,
+            so this parameter indicates the side length. If set, the forward method will perform repeated inference on crops of the
+            image, and aggregate the results. This also works for non-square images.
         """
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
@@ -79,15 +80,15 @@ class BaseModel(pl.LightningModule, ABC):
             batch (_type_): _description_ Either a tuple of (x, y) or (x, y, doys).
 
         Raises:
-            ValueError: _description_ If the batch size is not 1 and the model requires repeated inference on crops of the image. 
+            ValueError: _description_ If the batch size is not 1 and the model requires repeated inference on crops of the image.
             This is the case for ConvLSTM, when predicting on the test set. During training, it uses random crops of the required size,
-            so larger batch sizes can be used. 
+            so larger batch sizes can be used.
 
         Returns:
             _type_: _description_ Prediction and ground truth for each sample in the batch.
         """
 
-        # UTAE and TSViT use an additional doy feature as input. 
+        # UTAE and TSViT use an additional doy feature as input.
         if self.hparams.use_doy:
             x, y, doys = batch
         else:
@@ -96,9 +97,9 @@ class BaseModel(pl.LightningModule, ABC):
 
         # If the model requires a certain fixed size, perform repeated inference on crops of the image,
         # and aggregate the results. When we reach the last row or column, which might not be divisible by
-        # the required size, we align the crop window with the right/bottom edge of the image. This means 
+        # the required size, we align the crop window with the right/bottom edge of the image. This means
         # that there is some amount of overlap between the last two crops in each row/column. We handle this
-        # by simply overwriting the existing predictions with the new ones. 
+        # by simply overwriting the existing predictions with the new ones.
 
         if self.hparams.required_img_size is not None:
             B, T, C, H, W = x.shape
@@ -119,7 +120,7 @@ class BaseModel(pl.LightningModule, ABC):
 
                 for i in range(n_H):
                     for j in range(n_W):
-                        
+
                         # If we reach the bottom edge of the image, align the crop window with the bottom edge of the image
                         if i == n_H - 1:
                             H1 = H - H_req
@@ -209,7 +210,7 @@ class BaseModel(pl.LightningModule, ABC):
             on_epoch=True,
             prog_bar=True,
             logger=True,
-        )  
+        )
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -224,7 +225,7 @@ class BaseModel(pl.LightningModule, ABC):
         """
         y_hat, y = self.get_pred_and_gt(batch)
         y_hat = y_hat.detach()
-        y = y.detach()      
+        y = y.detach()
 
         loss = self.compute_loss(y_hat, y)
         self.test_f1(y_hat, y)
@@ -240,14 +241,15 @@ class BaseModel(pl.LightningModule, ABC):
         return loss
 
     def on_test_epoch_end(self) -> None:
-        """_summary_ Log the test PR curve and confusion matrix after predicting all test samples.
-        """
+        """_summary_ Log the test PR curve and confusion matrix after predicting all test samples."""
 
         test_metrics = self.test_metrics.compute()
         self.log("test_AP", test_metrics["average_precision"], sync_dist=True)
         self.log("test_UCE", test_metrics["uce"], sync_dist=True)
         wandb.log({"Test PR Curve": wandb.Image(test_metrics["fig_pr"])})
-        wandb.log({"Test Calibration Curve": wandb.Image(test_metrics["fig_calibration"])})
+        wandb.log(
+            {"Test Calibration Curve": wandb.Image(test_metrics["fig_calibration"])}
+        )
 
         conf_mat = self.conf_mat.compute().cpu().numpy()
         wandb_table = wandb.Table(
@@ -255,7 +257,6 @@ class BaseModel(pl.LightningModule, ABC):
         )
         wandb.log({"Test confusion matrix": wandb_table})
         plt.close()
-
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         x, y = batch
@@ -281,13 +282,23 @@ class BaseModel(pl.LightningModule, ABC):
 
     def compute_loss(self, y_hat, y):
         if self.hparams.loss_function == "Focal":
+            # Ensure alpha is in valid range [0, 1]
+            pos_weight = self.hparams.pos_class_weight
+            if pos_weight > 1:
+                # Normalize the weight to get a valid alpha
+                alpha = 1 - (pos_weight / (1 + pos_weight))
+            else:
+                alpha = 1 - pos_weight
+
+            # Clamp alpha to valid range [0, 1]
+            alpha = max(0.0, min(1.0, alpha))
+
             return self.loss(
                 y_hat,
                 y.float(),
-                alpha=1 - self.hparams.pos_class_weight,
+                alpha=alpha,
                 gamma=2,
                 reduction="mean",
             )
         else:
             return self.loss(y_hat, y.float())
-
