@@ -78,10 +78,12 @@ class PrithviEO2Lightning(BaseModel):
         patch_embed = getattr(self.backbone, "patch_embed", None)
         proj = getattr(patch_embed, "proj", None) if patch_embed is not None else None
         self.backbone_in_channels = int(getattr(proj, "in_channels", n_channels))
-        self.input_adapter = (
-            nn.Conv3d(n_channels, self.backbone_in_channels, kernel_size=1)
-            if self.backbone_in_channels != n_channels
-            else nn.Identity()
+        # Always map input channels to 6 for 600M backbone
+        self.input_adapter = nn.Conv3d(
+            in_channels=40,   # your dataset’s per-frame C
+            out_channels=6,   # what v2_600_tl expects
+            kernel_size=(1,1,1),
+            bias=False,
         )
         self.temporal_projector = TemporalProjector(self.backbone_dim, mode=temporal_pooling)
         self.channel_adapter = nn.LazyConv2d(self.backbone_dim, kernel_size=1)
@@ -251,10 +253,11 @@ class PrithviEO2Lightning(BaseModel):
         x, pad_h, pad_w = self._pad_to_patch_size(x)
         padded_h, padded_w = x.shape[-2], x.shape[-1]
         self._last_patch_hw = (padded_h // self.patch_size, padded_w // self.patch_size)
-        x_backbone = x.permute(0, 2, 1, 3, 4).contiguous()
-        x_backbone = self.input_adapter(x_backbone)
-        self._curr_input_hw = tuple(int(d) for d in x_backbone.shape[-2:])
-        backbone_output = self._forward_backbone(x_backbone)
+        # x is [B, T, C, H, W] coming from your datamodule
+        x = x.permute(0, 2, 1, 3, 4).contiguous()   # -> [B, C, T, H, W]
+        x = self.input_adapter(x)                   # 40 -> 6
+        self._curr_input_hw = tuple(int(d) for d in x.shape[-2:])
+        backbone_output = self._forward_backbone(x)
         feature = self._extract_feature(backbone_output)
         feature = self._select_spatial_feature(feature)
         if feature.shape[1] != self.backbone_dim:
