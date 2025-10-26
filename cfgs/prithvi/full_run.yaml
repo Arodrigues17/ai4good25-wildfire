@@ -9,28 +9,25 @@ optimizer:
 model:
   class_path: models.PrithviEO2Model.PrithviEO2Lightning
   init_args:
-    # required by BaseModel schema (will be ignored by Prithvi code)
-    n_channels: 6                 # 600M expects 6 per-frame channels
+    # per-frame channels must match backbone (600M expects 6)
+    n_channels: 6
     flatten_temporal_dimension: false
     pos_class_weight: 236
 
-    # actual Prithvi args you care about
+    # Prithvi args
     loss_function: BCE
     freeze_backbone: false
     temporal_pooling: conv
     head_hidden_dim: 256
-    #prithvi_variant: "prithvi_eo_v1_100"
-    #prithvi_variant: "prithvi_eo_v2_300"
-    prithvi_variant: "prithvi_eo_v2_600_tl
+    prithvi_variant: "prithvi_eo_v2_600_tl"
     num_frames: 5
-    #backbone_indices: [2, 5, 8, 11]  # for tiny & 100M
-    #backbone_indices: [5, 11, 17, 23] #these kind of seem arbitrary, but correspond to the end of each stage in the ViT
 
+    # 600M has 32 feature maps; use end-of-stage taps
+    backbone_indices: [7, 15, 23, 31]
 
-    backbone_indices: [7, 15, 23, 31]         # 600M has 32 maps; these are end-of-stage taps
-    required_img_size: [224, 224]             # any H,W multiples of 14 (e.g. 224=16×14)
-    backbone_padding: "reflect" 
-          
+    # keep inputs divisible by patch size (1,14,14) without cropping
+    required_img_size: [224, 224]
+
 do_train: true
 do_test: true
 do_predict: false

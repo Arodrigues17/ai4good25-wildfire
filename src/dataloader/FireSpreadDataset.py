@@ -15,6 +15,37 @@ from datetime import datetime
 
 
 class FireSpreadDataset(Dataset):
+    def _pad_to_at_least_hw(self, arr, target_h, target_w, mode="reflect"):
+        """
+        Pads arr (numpy or torch tensor) so that last two dims are at least target_h, target_w.
+        """
+        import numpy as np
+        if isinstance(arr, torch.Tensor):
+            arr_np = arr.cpu().numpy()
+            is_torch = True
+        else:
+            arr_np = arr
+            is_torch = False
+        H, W = arr_np.shape[-2], arr_np.shape[-1]
+        pad_h = max(0, target_h - H)
+        pad_w = max(0, target_w - W)
+        if pad_h == 0 and pad_w == 0:
+            return arr
+        pad_spec = [(0,0)] * (arr_np.ndim - 2) + [(0, pad_h), (0, pad_w)]
+        arr_padded = np.pad(arr_np, pad_spec, mode=mode)
+        if is_torch:
+            arr_padded = torch.from_numpy(arr_padded).to(arr.device).type(arr.dtype)
+        return arr_padded
+
+    def _rand_start(self, total, window):
+        """
+        Returns a valid start index so that start + window <= total.
+        If total <= window, returns 0.
+        """
+        import numpy as np
+        if total <= window:
+            return 0
+        return np.random.randint(0, total - window + 1)
     def __init__(self, data_dir: str, included_fire_years: List[int], n_leading_observations: int,
                  crop_side_length: int, load_from_hdf5: bool, is_train: bool, remove_duplicate_features: bool,
                  stats_years: List[int], n_leading_observations_test_adjustment: Optional[int] = None, 
@@ -396,28 +427,25 @@ class FireSpreadDataset(Dataset):
             _type_: _description_
         """
 
-        # Need square crop to prevent rotation from creating/destroying data at the borders, due to uneven side lengths.
-        # Try several crops, prefer the ones with most fire pixels in output, followed by most fire_pixels in input
+
+        crop = self.crop_side_length
+        # Pad x and y to at least crop size in H and W
+        x = self._pad_to_at_least_hw(x, crop, crop, mode="reflect")
+        # For y, if it's categorical, you may want mode="edge" or "constant". Here we use reflect for consistency.
+        y = self._pad_to_at_least_hw(y, crop, crop, mode="reflect")
+        H, W = x.shape[-2], x.shape[-1]
+
         best_n_fire_pixels = -1
         best_crop = (None, None)
-
         for i in range(10):
-            top = np.random.randint(0, x.shape[-2] - self.crop_side_length)
-            left = np.random.randint(0, x.shape[-1] - self.crop_side_length)
-            x_crop = TF.crop(
-                x, top, left, self.crop_side_length, self.crop_side_length)
-            y_crop = TF.crop(
-                y, top, left, self.crop_side_length, self.crop_side_length)
-
-            # We really care about having fire pixels in the target. But if we don't find any there,
-            # we care about fire pixels in the input, to learn to predict that no new observations will be made,
-            # even though previous days had active fires.
-            n_fire_pixels = x_crop[:, -1, ...].mean() + \
-                1000 * y_crop.float().mean()
+            top = self._rand_start(H, crop)
+            left = self._rand_start(W, crop)
+            x_crop = TF.crop(x, top, left, crop, crop)
+            y_crop = TF.crop(y, top, left, crop, crop)
+            n_fire_pixels = x_crop[:, -1, ...].mean() + 1000 * y_crop.float().mean()
             if n_fire_pixels > best_n_fire_pixels:
                 best_n_fire_pixels = n_fire_pixels
                 best_crop = (x_crop, y_crop)
-
         x, y = best_crop
 
         hflip = bool(np.random.random() > 0.5)
