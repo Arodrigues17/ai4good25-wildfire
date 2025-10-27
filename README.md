@@ -35,6 +35,9 @@ mamba activate wildfire
 pip install -r requirements.txt
 ```
 
+
+
+
 ### 2.2 Retrieve and process dataset 💽
 
 1. Download the compressed dataset, run in your shell: 
@@ -56,6 +59,11 @@ Test your set up by running the UNET mono-temporal baseline for a few epochs
 mamba activate wildfire
 python src/train.py --config=cfgs/unet/res18_monotemporal.yaml --trainer=cfgs/trainer_single_gpu.yaml --data=cfgs/data_monotemporal_full_features.yaml --seed_everything=0 --trainer.max_epochs=5 --do_test=True --data.data_dir /path/to/your/hdf5/dataset
 ```
+
+Alternatively, if using python virtual environments, you will nee to do the following:
+
+
+
 
 ### 2.4 Using the Prithvi-EO-2.0 backbone
 
