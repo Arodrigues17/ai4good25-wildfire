@@ -60,8 +60,35 @@ mamba activate wildfire
 python src/train.py --config=cfgs/unet/res18_monotemporal.yaml --trainer=cfgs/trainer_single_gpu.yaml --data=cfgs/data_monotemporal_full_features.yaml --seed_everything=0 --trainer.max_epochs=5 --do_test=True --data.data_dir /path/to/your/hdf5/dataset
 ```
 
-Alternatively, if using python virtual environments, you will nee to do the following:
+Alternatively, if you must rely on the site Python toolchain on the GPU nodes, use a local `venv` so you can pull the CUDA 12.1 wheels directly and keep `setuptools<81`, which avoids the `pkg_resources` breakage we observed with newer releases.
 
+```bash
+# from the project root
+deactivate 2>/dev/null || true
+rm -rf .venv-prithvi
+../python310/bin/python3.10 -m venv .venv-prithvi
+source .venv-prithvi/bin/activate
+
+python -m pip install --upgrade pip "setuptools<81" wheel
+export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu121"
+pip install "torch==2.4.1+cu121" "torchvision==0.19.1+cu121" "torchaudio==2.4.1+cu121"
+pip install "pytorch-lightning==2.0.1" "lightning-utilities==0.15.2" "torchmetrics==1.4.0"
+pip install -r requirements-priv_new.txt
+
+
+#to verity install
+python - <<'PY'
+import torch, pytorch_lightning as pl
+print("torch:", torch.__version__, "cuda:", torch.version.cuda, "available:", torch.cuda.is_available())
+if torch.cuda.is_available():
+    x = torch.randn(4096, 4096, device="cuda")
+    y = x @ x.t()
+    print("matmul ok, mean:", y.mean().item())
+print("pl:", pl.__version__)
+PY
+```
+
+The verification step checks that the environment sees the GPU and finishes a large matrix multiply without errors.
 
 
 

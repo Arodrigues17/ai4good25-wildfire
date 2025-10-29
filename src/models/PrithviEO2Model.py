@@ -1,9 +1,12 @@
 from typing import Any, Literal, Optional
 import math
+import types
+import warnings
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from .BaseModel import BaseModel
 from terratorch.registry import BACKBONE_REGISTRY
@@ -28,6 +31,26 @@ class TemporalProjector(nn.Module):
         raise ValueError(f"Unsupported temporal pooling mode: {self.mode}")
 
 
+class _CheckpointWrapper(nn.Module):
+    """Wraps a module to execute it under torch.utils.checkpoint."""
+
+    _is_checkpoint_wrapper = True
+
+    def __init__(self, inner: nn.Module) -> None:
+        super().__init__()
+        self.inner = inner
+
+    def forward(self, *args, **kwargs):
+        def _call(*inputs):
+            return self.inner(*inputs, **kwargs)
+
+        fn = _call if kwargs else self.inner
+        try:
+            return checkpoint(fn, *args, use_reentrant=False)
+        except TypeError:
+            return checkpoint(fn, *args)
+
+
 class PrithviEO2Lightning(BaseModel):
     def __init__(
         self,
@@ -41,6 +64,7 @@ class PrithviEO2Lightning(BaseModel):
         prithvi_variant: str = "prithvi_eo_v2_300",
         num_frames: int = 5,
         backbone_indices: Optional[list[int]] = None,
+        backbone_grad_checkpointing: bool = False,
         *args: Any,
         **kwargs: Any,
     ):
@@ -68,6 +92,10 @@ class PrithviEO2Lightning(BaseModel):
                 f"Failed to load Prithvi model '{prithvi_variant}' via TerraTorch. "
                 "Ensure terratorch is installed (`pip install terratorch`)."
             ) from exc
+        self._wrap_backbone_pos_encoding()
+        self.backbone_grad_checkpointing = backbone_grad_checkpointing
+        if self.backbone_grad_checkpointing:
+            self._enable_backbone_grad_checkpointing()
         if self.freeze_backbone:
             for param in self.backbone.parameters():
                 param.requires_grad = False
@@ -96,6 +124,76 @@ class PrithviEO2Lightning(BaseModel):
         )
         self._last_patch_hw = None
         self._curr_input_hw = None
+
+    def _wrap_backbone_pos_encoding(self) -> None:
+        def _wrap(module: Optional[nn.Module]) -> None:
+            if module is None:
+                return
+            interp = getattr(module, "interpolate_pos_encoding", None)
+            if interp is None or getattr(interp, "_device_aligned", False):
+                return
+            orig_interp = interp
+
+            def _wrapped(self, sample_shape, *args, _orig=orig_interp, **kwargs):
+                pos = _orig(sample_shape, *args, **kwargs)
+                if not isinstance(pos, torch.Tensor):
+                    return pos
+                target_device = None
+                ref = getattr(self, "pos_embed", None)
+                if isinstance(ref, torch.Tensor):
+                    target_device = ref.device
+                if target_device is None:
+                    param = next(self.parameters(recurse=False), None)
+                    if param is not None:
+                        target_device = param.device
+                if target_device is None:
+                    for buffer in self.buffers(recurse=False):
+                        target_device = buffer.device
+                        break
+                if target_device is not None and pos.device != target_device:
+                    pos = pos.to(target_device, non_blocking=True)
+                return pos
+
+            _wrapped._device_aligned = True  # type: ignore[attr-defined]
+            module.interpolate_pos_encoding = types.MethodType(_wrapped, module)
+
+        _wrap(self.backbone)
+        decoder = getattr(self.backbone, "decoder", None)
+        _wrap(decoder)
+
+    def _enable_backbone_grad_checkpointing(self) -> None:
+        candidates = [self.backbone, getattr(self.backbone, "model", None)]
+        for module in candidates:
+            if module is None:
+                continue
+            setter = getattr(module, "set_grad_checkpointing", None)
+            if callable(setter):
+                setter(True)
+                return
+
+        applied = False
+        for module in candidates:
+            blocks = getattr(module, "blocks", None)
+            if isinstance(blocks, nn.ModuleList):
+                wrapped = []
+                for blk in blocks:
+                    if getattr(blk, "_is_checkpoint_wrapper", False):
+                        wrapped.append(blk)
+                    else:
+                        wrapped.append(_CheckpointWrapper(blk))
+                module.blocks = nn.ModuleList(wrapped)
+                applied = True
+
+        if applied:
+            return
+
+        if not hasattr(self, "_warned_grad_checkpoint"):
+            self._warned_grad_checkpoint = True
+            warnings.warn(
+                "[PrithviEO2Lightning] Gradient checkpointing requested but no compatible "
+                "mechanism found; continuing without it.",
+                RuntimeWarning,
+            )
 
     def _backbone_patch_hw(self) -> Optional[tuple[int, int]]:
         bb = self.backbone

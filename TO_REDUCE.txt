@@ -1,0 +1,48 @@
+next things to try until no OOM:
+full_run.yaml:
+-  num_frames = 2 (or 1)
+-  prithvi_variant: "prithvi_eo_v2_300_tl"
+-  head_hidden_dim: 128 or 64 or 32
+-  freeze_backbone = true
+-  required_img_size: [112, 112]
+
+
+Look at GPU Memory Allocated (%) to see how much being used and adjust the following run accordingly:
+
+
+Current run:
+seed_everything: 0
+
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 1e-4
+    weight_decay: 0.01
+
+model:
+  class_path: models.PrithviEO2Model.PrithviEO2Lightning
+  init_args:
+    # per-frame channels must match backbone (600M expects 6)
+    n_channels: 6
+    flatten_temporal_dimension: false
+    pos_class_weight: 236
+
+    # Prithvi args
+    loss_function: BCE
+    freeze_backbone: true
+    temporal_pooling: conv
+    head_hidden_dim: 64
+    prithvi_variant: "prithvi_eo_v2_600_tl"
+    num_frames: 2
+    backbone_grad_checkpointing: true
+
+    # 600M has 32 feature maps; use end-of-stage taps
+    backbone_indices: [7, 15, 23, 31]
+
+    # keep inputs divisible by patch size (1,14,14) without cropping
+    required_img_size: [112, 112]
+
+do_train: true
+do_test: true
+do_predict: false
+

@@ -1,4 +1,4 @@
-#!/zfs/ai4good/student/antrod/ai4good25-wildfire/.venv-prithvi/bin/python3.10
+#!/zfs/ai4good/student/antrod/ai4good25-wildfire/.venv-prithvi/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

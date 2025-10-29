@@ -5,6 +5,7 @@ from typing import Any, Literal, Optional, Tuple
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchmetrics
 import wandb
 import matplotlib.pyplot as plt
@@ -144,42 +145,71 @@ class BaseModel(pl.LightningModule, ABC):
             B, T, C, H, W = x.shape
 
             if x.shape[-2:] != self.hparams.required_img_size:
-                if B != 1:
-                    raise ValueError(
-                        "Not implemented: repeated cropping for batch size > 1."
-                    )
                 # Use crops of size H_rq x W_rq
                 H_req, W_req = self.hparams.required_img_size
 
                 n_H = math.ceil(H / H_req)
                 n_W = math.ceil(W / W_req)
 
-                # Aggregate predictions in this tensor
-                agg_output = torch.zeros(B, H, W, device=self.device)
+                agg_output = None
+                agg_counts = None
 
                 for i in range(n_H):
                     for j in range(n_W):
                         
                         # If we reach the bottom edge of the image, align the crop window with the bottom edge of the image
                         if i == n_H - 1:
-                            H1 = H - H_req
+                            H1 = max(0, H - H_req)
                             H2 = H
                         else:
                             H1 = i * H_req
-                            H2 = (i + 1) * H_req
+                            H2 = min(H, (i + 1) * H_req)
                         # If we reach the right edge of the image, align the crop window with the right edge of the image
                         if j == n_W - 1:
-                            W1 = W - W_req
+                            W1 = max(0, W - W_req)
                             W2 = W
                         else:
                             W1 = j * W_req
-                            W2 = (j + 1) * W_req
+                            W2 = min(W, (j + 1) * W_req)
 
                         x_crop = x[:, :, :, H1:H2, W1:W2]
 
-                        agg_output[:, H1:H2, W1:W2] = _call_forward(x_crop).squeeze(1)
+                        crop_h = H2 - H1
+                        crop_w = W2 - W1
+                        pad_bottom = max(0, H_req - crop_h)
+                        pad_right = max(0, W_req - crop_w)
+                        if pad_bottom or pad_right:
+                            x_crop = F.pad(
+                                x_crop,
+                                (0, pad_right, 0, pad_bottom, 0, 0),
+                                mode="reflect",
+                            )
 
-                y_hat = agg_output
+                        crop_pred = _call_forward(x_crop).squeeze(1)
+                        crop_pred = crop_pred[:, :crop_h, :crop_w]
+
+                        if agg_output is None:
+                            agg_output = torch.zeros(
+                                (B, H, W),
+                                device=crop_pred.device,
+                                dtype=crop_pred.dtype,
+                            )
+                            agg_counts = torch.zeros_like(agg_output)
+
+                        pad = (W - W2, W1, H - H2, H1)
+                        padded_pred = F.pad(crop_pred.unsqueeze(1), pad).squeeze(1)
+                        padded_mask = F.pad(
+                            torch.ones_like(crop_pred).unsqueeze(1),
+                            pad,
+                        ).squeeze(1)
+
+                        agg_output = agg_output + padded_pred
+                        agg_counts = agg_counts + padded_mask
+
+                if agg_output is None:
+                    raise RuntimeError("Failed to generate cropped predictions.")
+
+                y_hat = agg_output / agg_counts.clamp_min(1)
                 return y_hat, y
 
         y_hat = _call_forward(x).squeeze(1)
@@ -341,4 +371,3 @@ class BaseModel(pl.LightningModule, ABC):
             )
         else:
             return self.loss(y_hat, y.float())
-
