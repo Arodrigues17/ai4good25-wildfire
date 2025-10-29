@@ -412,6 +412,13 @@ class ConvLSTM_Guillermo_v1(BaseModel):
         )
         self.save_hyperparameters()
 
+        # Add Average Precision metrics for training and validation
+        # Using compute_on_cpu=True to reduce GPU memory usage
+        self.train_ap = torchmetrics.AveragePrecision(
+            task="binary", compute_on_cpu=True
+        )
+        self.val_ap = torchmetrics.AveragePrecision(task="binary", compute_on_cpu=True)
+
         # Default parameters
         if kernel_sizes is None:
             kernel_sizes = [(3, 3), (3, 3), (3, 3)]
@@ -531,10 +538,53 @@ class ConvLSTM_Guillermo_v1(BaseModel):
             )
 
         # Compute metrics
-        pred_binary = (torch.sigmoid(pred) > 0.5).long()
+        pred_probs = torch.sigmoid(pred)  # Get probabilities for AP
+        pred_binary = (pred_probs > 0.5).long()
         gt_binary = gt.long()
 
-        train_f1 = self.train_f1(pred_binary, gt_binary)
+        # Update metrics - F1 for step-level, AP only for epoch-level
+        self.train_f1(pred_binary, gt_binary)
+        self.train_ap(pred_probs, gt_binary)
 
-        self.log("train/f1", train_f1, on_step=True, on_epoch=True, prog_bar=True)
+        # Log F1 at both step and epoch level
+        self.log("train/f1", self.train_f1, on_step=True, on_epoch=True, prog_bar=True)
+        # Log AP only at epoch level to save memory
+        self.log(
+            "train/ap", self.train_ap, on_step=False, on_epoch=True, prog_bar=False
+        )
+
         return total_loss
+
+    def validation_step(self, batch, batch_idx):
+        """Validation step with Average Precision tracking."""
+        pred, gt = self.get_pred_and_gt(batch)
+
+        # Ensure correct data types
+        pred = pred.float()
+        gt = gt.float()
+
+        # Compute loss
+        val_loss = self.compute_loss(pred, gt)
+
+        # Compute metrics
+        pred_probs = torch.sigmoid(pred)
+        pred_binary = (pred_probs > 0.5).long()
+        gt_binary = gt.long()
+
+        # Update metrics
+        self.val_f1(pred_binary, gt_binary)
+        self.val_ap(pred_probs, gt_binary)
+
+        # Log metrics
+        self.log(
+            "val_loss",
+            val_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log("val_f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val_ap", self.val_ap, on_step=False, on_epoch=True, prog_bar=True)
+
+        return val_loss
