@@ -3,6 +3,7 @@ from typing import Any, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchmetrics
 from torch.autograd import Variable
 
 from .BaseModel import BaseModel
