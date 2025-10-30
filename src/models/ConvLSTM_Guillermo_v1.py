@@ -473,7 +473,7 @@ class ConvLSTM_Guillermo_v1(BaseModel):
             return main_output
 
     def get_pred_and_gt(self, batch):
-        """Override to handle tuple output during training."""
+        """Override to handle tuple output during training and large images during testing."""
         # UTAE and TSViT use an additional doy feature as input.
         if self.hparams.use_doy:
             x, y, doys = batch
@@ -481,7 +481,44 @@ class ConvLSTM_Guillermo_v1(BaseModel):
             x, y = batch
             doys = None
 
-        # Get model prediction
+        # Call parent's get_pred_and_gt to handle image cropping for test set
+        # But we need to handle it ourselves because parent doesn't know about tuple output
+
+        # Check if we need cropping (test images are larger than required size)
+        if self.hparams.required_img_size is not None:
+            B, T, C, H, W = x.shape
+            H_req, W_req = self.hparams.required_img_size
+
+            if x.shape[-2:] != self.hparams.required_img_size:
+                if B != 1:
+                    raise ValueError("Batch size must be 1 for cropped inference.")
+
+                # Use cropping logic from BaseModel
+                import math
+
+                n_H = math.ceil(H / H_req)
+                n_W = math.ceil(W / W_req)
+                agg_output = torch.zeros(B, H, W, device=self.device)
+
+                for i in range(n_H):
+                    for j in range(n_W):
+                        H1 = H - H_req if i == n_H - 1 else i * H_req
+                        H2 = H if i == n_H - 1 else (i + 1) * H_req
+                        W1 = W - W_req if j == n_W - 1 else j * W_req
+                        W2 = W if j == n_W - 1 else (j + 1) * W_req
+
+                        x_crop = x[:, :, :, H1:H2, W1:W2]
+                        output = self(x_crop, doys)
+
+                        # Handle tuple output (only use main prediction for test)
+                        if isinstance(output, tuple):
+                            output = output[0]
+
+                        agg_output[:, H1:H2, W1:W2] = output.squeeze(1)
+
+                return agg_output, y
+
+        # Normal forward pass (training/validation with correct size)
         output = self(x, doys)
 
         # Handle tuple output during training
