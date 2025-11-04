@@ -1,10 +1,11 @@
 data_dir: DATA_DIR_PATH
 batch_size: 16
-n_leading_observations: 5
-crop_side_length: 128
+n_leading_observations: 4
+crop_side_length: 112
 load_from_hdf5: true
 num_workers: 8
-remove_duplicate_features: false
+remove_duplicate_features: true
 features_to_keep: null
-n_leading_observations_test_adjustment: 5
+n_leading_observations_test_adjustment: 4
 return_doy : true
+return_metadata: false

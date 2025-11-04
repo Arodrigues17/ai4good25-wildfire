@@ -3,11 +3,18 @@ model:
   init_args:
     n_channels: 0            # overwritten by LightningCLI before instantiation
     flatten_temporal_dimension: false
-    pos_class_weight: 1.0    # overwritten with fold-specific value
+    pos_class_weight: 1.0
     loss_function: BCE
-    freeze_backbone: true
+    freeze_backbone: false
     temporal_pooling: conv
     head_hidden_dim: 256
-    prithvi_variant: "prithvi_eo_v2_300"
-    num_frames: 5
+    prithvi_variant: "prithvi_eo_v2_300_tl"
+    backbone_grad_checkpointing: true
+    feature_fusion: concat
+    backbone_lr_scale: 0.1
+    unfreeze_backbone_blocks: 0
     backbone_indices: [5, 11, 17, 23]
+
+do_train: true
+do_test: true
+do_predict: false

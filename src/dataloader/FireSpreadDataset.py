@@ -49,7 +49,8 @@ class FireSpreadDataset(Dataset):
     def __init__(self, data_dir: str, included_fire_years: List[int], n_leading_observations: int,
                  crop_side_length: int, load_from_hdf5: bool, is_train: bool, remove_duplicate_features: bool,
                  stats_years: List[int], n_leading_observations_test_adjustment: Optional[int] = None, 
-                 features_to_keep: Optional[List[int]] = None, return_doy: bool = False):
+                 features_to_keep: Optional[List[int]] = None, return_doy: bool = False,
+                 return_metadata: bool = False):
         """_summary_
 
         Args:
@@ -65,6 +66,7 @@ class FireSpreadDataset(Dataset):
         In practice, this means that if n_leading_observations is smaller than this value, some samples are skipped. Defaults to None. If None, nothing is skipped. This is especially used for the train and val set. 
             features_to_keep (Optional[List[int]], optional): _description_. List of feature indices from 0 to 39, indicating which features to keep. Defaults to None, which means using all features.
             return_doy (bool, optional): _description_. Return the day of the year per time step, as an additional feature. Defaults to False.
+            return_metadata (bool, optional): _description_. If True, additionally return temporal metadata (year and day of year per frame) and scene centroid (lon, lat). Requires loading data from HDF5 files. Defaults to False.
 
         Raises:
             ValueError: _description_ Raised if input values are not in the expected ranges.
@@ -73,6 +75,7 @@ class FireSpreadDataset(Dataset):
 
         self.stats_years = stats_years
         self.return_doy = return_doy
+        self.return_metadata = return_metadata
         self.features_to_keep = features_to_keep
         self.remove_duplicate_features = remove_duplicate_features
         self.is_train = is_train
@@ -171,32 +174,67 @@ class FireSpreadDataset(Dataset):
         """
 
         in_fire_index += self.skip_initial_samples
-        end_index = (in_fire_index + self.n_leading_observations + 1)
+        end_index = in_fire_index + self.n_leading_observations + 1
+
+        doys = None
+        temporal_coords = None
+        location_coords = None
 
         if self.load_from_hdf5:
             hdf5_path = self.imgs_per_fire[found_fire_year][found_fire_name][0]
             with h5py.File(hdf5_path, 'r') as f:
                 imgs = f["data"][in_fire_index:end_index]
+                if self.return_doy or self.return_metadata:
+                    date_strings = f["data"].attrs["img_dates"][in_fire_index:end_index - 1]
                 if self.return_doy:
-                    doys = f["data"].attrs["img_dates"][in_fire_index:(
-                        end_index-1)]
-                    doys = self.img_dates_to_doys(doys)
-                    doys = torch.Tensor(doys)
+                    doys = torch.tensor(self.img_dates_to_doys(date_strings), dtype=torch.float32)
+                if self.return_metadata:
+                    temporal_coords = torch.tensor(
+                        self.img_dates_to_temporal_coords(date_strings), dtype=torch.float32
+                    )
+                    lnglat = f["data"].attrs.get("lnglat")
+                    if lnglat is not None:
+                        location_coords = torch.tensor(lnglat, dtype=torch.float32)
             x, y = np.split(imgs, [-1], axis=0)
             # Last image's active fire mask is used as label, rest is input data
             y = y[0, -1, ...]
         else:
             imgs_to_load = self.imgs_per_fire[found_fire_year][found_fire_name][in_fire_index:end_index]
             imgs = []
-            for img_path in imgs_to_load:
+            first_coords = None
+            for idx, img_path in enumerate(imgs_to_load):
                 with rasterio.open(img_path, 'r') as ds:
+                    if idx == 0:
+                        first_coords = ds.lnglat()
                     imgs.append(ds.read())
             x = np.stack(imgs[:-1], axis=0)
             y = imgs[-1][-1, ...]
+            if self.return_doy or self.return_metadata:
+                date_strings = [
+                    img_path.split("/")[-1].split("_")[0].replace(".tif", "")
+                    for img_path in imgs_to_load[:-1]
+                ]
+            if self.return_doy:
+                doys = torch.tensor(self.img_dates_to_doys(date_strings), dtype=torch.float32)
+            if self.return_metadata:
+                temporal_coords = torch.tensor(
+                    self.img_dates_to_temporal_coords(date_strings), dtype=torch.float32
+                )
+                if first_coords is not None:
+                    location_coords = torch.tensor(first_coords, dtype=torch.float32)
 
+        outputs = [x, y]
+        metadata = {}
         if self.return_doy:
-            return x, y, doys
-        return x, y
+            outputs.append(doys)
+        if self.return_metadata:
+            if temporal_coords is not None:
+                metadata["temporal_coords"] = temporal_coords
+            if location_coords is not None:
+                metadata["location_coords"] = location_coords
+            if metadata:
+                outputs.append(metadata)
+        return tuple(outputs)
 
     def __getitem__(self, index):
 
@@ -205,8 +243,13 @@ class FireSpreadDataset(Dataset):
         loaded_imgs = self.load_imgs(
             found_fire_year, found_fire_name, in_fire_index)
 
-        if self.return_doy:
+        metadata = {}
+        if self.return_doy and self.return_metadata:
+            x, y, doys, metadata = loaded_imgs
+        elif self.return_doy:
             x, y, doys = loaded_imgs
+        elif self.return_metadata:
+            x, y, metadata = loaded_imgs
         else:
             x, y = loaded_imgs
 
@@ -224,8 +267,12 @@ class FireSpreadDataset(Dataset):
                 raise NotImplementedError(f"Removing features is only implemented for 4D tensors, but got {x.shape=}.")
             x = x[:, self.features_to_keep, ...]
 
+        if self.return_doy and metadata:
+            return x, y, doys, metadata
         if self.return_doy:
             return x, y, doys
+        if metadata:
+            return x, y, metadata
         return x, y
 
     def __len__(self):
@@ -234,9 +281,9 @@ class FireSpreadDataset(Dataset):
     def validate_inputs(self):
         if self.n_leading_observations < 1:
             raise ValueError("Need at least one day of observations.")
-        if self.return_doy and not self.load_from_hdf5:
+        if (self.return_doy or self.return_metadata) and not self.load_from_hdf5:
             raise NotImplementedError(
-                "Returning day of year is only implemented for hdf5 files.")
+                "Returning day of year or metadata is only implemented for hdf5 files.")
         if self.n_leading_observations_test_adjustment is not None:
             if self.n_leading_observations_test_adjustment < self.n_leading_observations:
                 raise ValueError(
@@ -591,6 +638,23 @@ class FireSpreadDataset(Dataset):
         date_format = "%Y-%m-%d"
         # In old preprocessing, the dates still had a TIF file extension, which is also removed here.
         return [datetime.strptime(img_date.replace(".tif", ""), date_format).timetuple().tm_yday for img_date in img_dates]
+
+    @staticmethod
+    def img_dates_to_temporal_coords(img_dates):
+        """Convert date strings to (year, day-of-year) coordinates expected by Prithvi models.
+
+        Args:
+            img_dates (Iterable[str]): List of ISO-formatted date strings.
+
+        Returns:
+            List[List[float]]: Temporal coordinates with shape (T, 2) where the second column is zero-indexed day-of-year.
+        """
+        date_format = "%Y-%m-%d"
+        coords = []
+        for img_date in img_dates:
+            dt = datetime.strptime(img_date.replace(".tif", ""), date_format)
+            coords.append([float(dt.year), float(dt.timetuple().tm_yday - 1)])
+        return coords
 
     @staticmethod
     def map_channel_index_to_features(only_base:bool = False):

@@ -60,6 +60,8 @@ class MyLightningCLI(LightningCLI):
             self.config.data.features_to_keep,
             self.config.data.remove_duplicate_features)
         self.config.model.init_args.n_channels = n_features
+        if hasattr(self.config.model.init_args, "num_frames"):
+            self.config.model.init_args.num_frames = self.config.data.n_leading_observations
 
         # The exact positive class weight changes with the data fold in the data module, but the weight is needed to instantiate the model.
         # Non-fire pixels are marked as missing values in the active fire feature, so we simply use that to compute the positive class weight.

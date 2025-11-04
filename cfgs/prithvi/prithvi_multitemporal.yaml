@@ -2,11 +2,13 @@ model:
   class_path: models.PrithviEO2Model.PrithviEO2Lightning
   init_args:
     loss_function: BCE
-    freeze_backbone: true
+    freeze_backbone: false
     temporal_pooling: conv
     head_hidden_dim: 256
     prithvi_variant: "prithvi_eo_v2_300"
-    num_frames: 5  # For 5-day history
+    backbone_grad_checkpointing: true
+    feature_fusion: concat
+    backbone_lr_scale: 0.1
     backbone_indices: [5, 11, 17, 23]
 
 

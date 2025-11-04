@@ -14,7 +14,7 @@ class FireSpreadDataModule(LightningDataModule):
                  crop_side_length: int,
                  load_from_hdf5: bool, num_workers: int, remove_duplicate_features: bool,
                  features_to_keep: Union[Optional[List[int]], str] = None, return_doy: bool = False,
-                 data_fold_id: int = 0, *args, **kwargs):
+                 return_metadata: bool = False, data_fold_id: int = 0, *args, **kwargs):
         """_summary_ Data module for loading the WildfireSpreadTS dataset.
 
         Args:
@@ -32,6 +32,7 @@ class FireSpreadDataModule(LightningDataModule):
             remove_duplicate_features (bool): _description_ Remove duplicate static features from all time steps but the last one. Requires flattening the temporal dimension, since after removal, the number of features is not the same across time steps anymore.
             features_to_keep (Union[Optional[List[int]], str], optional): _description_. List of feature indices from 0 to 39, indicating which features to keep. Defaults to None, which means using all features.
             return_doy (bool, optional): _description_. Return the day of the year per time step, as an additional feature. Defaults to False.
+            return_metadata (bool, optional): _description_. Return additional metadata (temporal coordinates and location) required by Prithvi models. Defaults to False.
             data_fold_id (int, optional): _description_. Which data fold to use, i.e. splitting years into train/val/test set. Defaults to 0.
         """
         super().__init__()
@@ -39,6 +40,7 @@ class FireSpreadDataModule(LightningDataModule):
         self.n_leading_observations_test_adjustment = n_leading_observations_test_adjustment
         self.data_fold_id = data_fold_id
         self.return_doy = return_doy
+        self.return_metadata = return_metadata
         # wandb apparently can't pass None values via the command line without turning them into a string, so we need this workaround
         self.features_to_keep = features_to_keep if type(
             features_to_keep) != str else None
@@ -69,6 +71,7 @@ class FireSpreadDataModule(LightningDataModule):
                                                load_from_hdf5=self.load_from_hdf5, is_train=True,
                                                remove_duplicate_features=self.remove_duplicate_features,
                                                features_to_keep=self.features_to_keep, return_doy=self.return_doy,
+                                               return_metadata=self.return_metadata,
                                                stats_years=train_years)
         self.val_dataset = FireSpreadDataset(data_dir=self.data_dir, included_fire_years=val_years,
                                              n_leading_observations=self.n_leading_observations,
@@ -77,6 +80,7 @@ class FireSpreadDataModule(LightningDataModule):
                                              load_from_hdf5=self.load_from_hdf5, is_train=True,
                                              remove_duplicate_features=self.remove_duplicate_features,
                                              features_to_keep=self.features_to_keep, return_doy=self.return_doy,
+                                             return_metadata=self.return_metadata,
                                              stats_years=train_years)
         self.test_dataset = FireSpreadDataset(data_dir=self.data_dir, included_fire_years=test_years,
                                               n_leading_observations=self.n_leading_observations,
@@ -85,6 +89,7 @@ class FireSpreadDataModule(LightningDataModule):
                                               load_from_hdf5=self.load_from_hdf5, is_train=False,
                                               remove_duplicate_features=self.remove_duplicate_features,
                                               features_to_keep=self.features_to_keep, return_doy=self.return_doy,
+                                              return_metadata=self.return_metadata,
                                               stats_years=train_years)
 
     def train_dataloader(self):
@@ -131,4 +136,3 @@ class FireSpreadDataModule(LightningDataModule):
             f"Using the following dataset split:\nTrain years: {train_years}, Val years: {val_years}, Test years: {test_years}")
 
         return train_years, val_years, test_years
-

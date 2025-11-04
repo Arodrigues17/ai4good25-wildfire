@@ -65,6 +65,9 @@ class PrithviEO2Lightning(BaseModel):
         num_frames: int = 5,
         backbone_indices: Optional[list[int]] = None,
         backbone_grad_checkpointing: bool = False,
+        feature_fusion: Literal["concat", "sum", "mean", "last"] = "concat",
+        backbone_lr_scale: float = 1.0,
+        unfreeze_backbone_blocks: int = 0,
         *args: Any,
         **kwargs: Any,
     ):
@@ -73,6 +76,7 @@ class PrithviEO2Lightning(BaseModel):
             flatten_temporal_dimension=flatten_temporal_dimension,
             pos_class_weight=pos_class_weight,
             loss_function=loss_function,
+            use_doy=True,
             *args,
             **kwargs,
         )
@@ -80,6 +84,10 @@ class PrithviEO2Lightning(BaseModel):
         self.temporal_pooling = temporal_pooling
         self.prithvi_variant = prithvi_variant
         self.num_frames = num_frames
+        self.feature_fusion = feature_fusion
+        self.backbone_lr_scale = backbone_lr_scale
+        self.unfreeze_backbone_blocks = max(0, int(unfreeze_backbone_blocks or 0))
+        self._metadata_fallback_year = 2020.0
         self.backbone_indices = backbone_indices or [5, 11, 17, 23]
         try:
             self.backbone = BACKBONE_REGISTRY.build(
@@ -96,21 +104,20 @@ class PrithviEO2Lightning(BaseModel):
         self.backbone_grad_checkpointing = backbone_grad_checkpointing
         if self.backbone_grad_checkpointing:
             self._enable_backbone_grad_checkpointing()
-        if self.freeze_backbone:
-            for param in self.backbone.parameters():
-                param.requires_grad = False
+        self._apply_backbone_freeze()
         self.backbone_dim = int(getattr(self.backbone, "embed_dim", getattr(self.backbone, "hidden_size", 768)))
         self.patch_size = getattr(self.backbone, "patch_size", 16)
         if isinstance(self.patch_size, (tuple, list)):
             self.patch_size = int(self.patch_size[0])
         patch_embed = getattr(self.backbone, "patch_embed", None)
         proj = getattr(patch_embed, "proj", None) if patch_embed is not None else None
-        self.backbone_in_channels = int(getattr(proj, "in_channels", n_channels))
-        # Always map input channels to 6 for 600M backbone
+        self.backbone_in_channels = int(
+            getattr(self.backbone, "in_channels", getattr(proj, "in_channels", n_channels))
+        )
         self.input_adapter = nn.Conv3d(
-            in_channels=40,   # your dataset’s per-frame C
-            out_channels=6,   # what v2_600_tl expects
-            kernel_size=(1,1,1),
+            in_channels=n_channels,
+            out_channels=self.backbone_in_channels,
+            kernel_size=(1, 1, 1),
             bias=False,
         )
         self.temporal_projector = TemporalProjector(self.backbone_dim, mode=temporal_pooling)
@@ -124,6 +131,55 @@ class PrithviEO2Lightning(BaseModel):
         )
         self._last_patch_hw = None
         self._curr_input_hw = None
+    
+    def _apply_backbone_freeze(self) -> None:
+        if not self.freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = True
+            return
+
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+        if self.unfreeze_backbone_blocks > 0:
+            self._unfreeze_backbone_tail(self.unfreeze_backbone_blocks)
+
+    def _resolve_backbone_blocks(self) -> Optional[nn.ModuleList]:
+        blocks = getattr(self.backbone, "blocks", None)
+        if isinstance(blocks, nn.ModuleList):
+            return blocks
+        model = getattr(self.backbone, "model", None)
+        if model is not None:
+            blocks = getattr(model, "blocks", None)
+            if isinstance(blocks, nn.ModuleList):
+                return blocks
+        return None
+
+    def _unfreeze_backbone_tail(self, n_blocks: int) -> None:
+        blocks = self._resolve_backbone_blocks()
+        if blocks is None:
+            warnings.warn(
+                "[PrithviEO2Lightning] Requested to unfreeze backbone blocks, "
+                "but no block container was found.",
+                RuntimeWarning,
+            )
+            return
+
+        n_blocks = min(len(blocks), max(0, int(n_blocks)))
+        if n_blocks == 0:
+            return
+
+        for block in blocks[-n_blocks:]:
+            for param in block.parameters():
+                param.requires_grad = True
+
+        for attr in ("norm", "fc_norm", "head_norm"):
+            module = getattr(self.backbone, attr, None)
+            if module is None:
+                module = getattr(getattr(self.backbone, "model", None), attr, None)
+            if module is not None:
+                for param in module.parameters():
+                    param.requires_grad = True
 
     def _wrap_backbone_pos_encoding(self) -> None:
         def _wrap(module: Optional[nn.Module]) -> None:
@@ -231,10 +287,20 @@ class PrithviEO2Lightning(BaseModel):
             x = x.view(b, t, c, h + pad_h, w + pad_w)
         return x, pad_h, pad_w
 
-    def _forward_backbone(self, x: torch.Tensor):
+    def _forward_backbone(
+        self,
+        x: torch.Tensor,
+        temporal_coords: Optional[torch.Tensor] = None,
+        location_coords: Optional[torch.Tensor] = None,
+    ):
+        kwargs = {}
+        if temporal_coords is not None:
+            kwargs["temporal_coords"] = temporal_coords
+        if location_coords is not None:
+            kwargs["location_coords"] = location_coords
         runners = (
-            lambda: self.backbone(pixel_values=x),
-            lambda: self.backbone(x),
+            lambda: self.backbone(pixel_values=x, **kwargs),
+            lambda: self.backbone(x, **kwargs),
         )
         last_error: Optional[TypeError] = None
         for runner in runners:
@@ -267,12 +333,48 @@ class PrithviEO2Lightning(BaseModel):
             return next(iter(backbone_output.values()))
         return backbone_output
 
-    def _select_spatial_feature(self, feature: Any) -> torch.Tensor:
-        if isinstance(feature, dict):
-            feature = self._extract_feature(feature)
-        if isinstance(feature, (list, tuple)):
-            valid_indices = [idx for idx in self.backbone_indices if idx < len(feature)]
-            feature = feature[valid_indices[-1]] if valid_indices else feature[-1]
+    def _prepare_temporal_coords(
+        self,
+        temporal_coords: Optional[torch.Tensor],
+        doys: Optional[torch.Tensor],
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Optional[torch.Tensor]:
+        coords = temporal_coords
+        if coords is None and doys is not None:
+            if doys.dim() == 1:
+                doys = doys.unsqueeze(0)
+            doys = doys.to(device=device, dtype=dtype)
+            base_year = torch.full_like(doys, fill_value=self._metadata_fallback_year, dtype=dtype)
+            coords = torch.stack((base_year, doys - 1.0), dim=-1)
+        if coords is None:
+            return None
+        if coords.dim() == 2:
+            coords = coords.unsqueeze(0)
+        if coords.shape[0] != batch_size:
+            coords = coords.expand(batch_size, -1, -1)
+        return coords.to(device=device, dtype=dtype, non_blocking=True)
+
+    def _prepare_location_coords(
+        self,
+        location_coords: Optional[torch.Tensor],
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Optional[torch.Tensor]:
+        if location_coords is None:
+            return None
+        coords = location_coords
+        if not isinstance(coords, torch.Tensor):
+            coords = torch.as_tensor(coords, dtype=dtype, device=device)
+        if coords.dim() == 1:
+            coords = coords.unsqueeze(0)
+        if coords.shape[0] != batch_size:
+            coords = coords.expand(batch_size, -1)
+        return coords.to(device=device, dtype=dtype, non_blocking=True)
+
+    def _prepare_feature_map(self, feature: torch.Tensor) -> torch.Tensor:
         if not isinstance(feature, torch.Tensor):
             raise RuntimeError("Prithvi backbone did not return tensor features.")
         if feature.dim() == 5:
@@ -289,6 +391,40 @@ class PrithviEO2Lightning(BaseModel):
             raise RuntimeError(f"Unexpected feature shape after processing: {feature.shape}")
         return feature
 
+    def _gather_feature_maps(self, feature: Any) -> list[torch.Tensor]:
+        if isinstance(feature, dict):
+            feature = self._extract_feature(feature)
+        selected = []
+        if isinstance(feature, (list, tuple)):
+            valid_indices = [idx for idx in self.backbone_indices if idx < len(feature)]
+            if not valid_indices:
+                selected = [feature[-1]]
+            else:
+                selected = [feature[idx] for idx in valid_indices]
+        else:
+            selected = [feature]
+        return [self._prepare_feature_map(feat) for feat in selected]
+
+    def _select_spatial_feature(self, feature: Any) -> torch.Tensor:
+        maps = self._gather_feature_maps(feature)
+        if not maps:
+            raise RuntimeError("No feature maps extracted from Prithvi backbone.")
+        if self.feature_fusion == "last" or len(maps) == 1:
+            return maps[-1]
+        target_hw = maps[-1].shape[-2:]
+        resized = [
+            fmap if fmap.shape[-2:] == target_hw
+            else F.interpolate(fmap, size=target_hw, mode="bilinear", align_corners=False)
+            for fmap in maps
+        ]
+        if self.feature_fusion == "concat":
+            return torch.cat(resized, dim=1)
+        if self.feature_fusion == "sum":
+            return torch.stack(resized, dim=0).sum(dim=0)
+        if self.feature_fusion == "mean":
+            return torch.stack(resized, dim=0).mean(dim=0)
+        raise ValueError(f"Unsupported feature fusion mode: {self.feature_fusion}")
+
     def _tokens_to_map(self, tokens: torch.Tensor, remove_cls_token: bool = True) -> torch.Tensor:
         if tokens.dim() != 3:
             raise ValueError(f"Expected (B, L, C) tokens, got {tuple(tokens.shape)}.")
@@ -302,8 +438,14 @@ class PrithviEO2Lightning(BaseModel):
             ph, pw = patch_hw
             H, W = curr_hw
             if H % ph != 0 or W % pw != 0:
-                raise ValueError(f"Input {H}x{W} is not divisible by patch {ph}x{pw}.")
-            gh, gw = H // ph, W // pw
+                fallback_hw = getattr(self, "_last_patch_hw", None)
+                if fallback_hw is not None:
+                    gh, gw = fallback_hw
+                else:
+                    gh = math.ceil(H / ph)
+                    gw = math.ceil(W / pw)
+            else:
+                gh, gw = H // ph, W // pw
             patch_area = gh * gw
             if remove_cls_token and seq_len == patch_area + 1:
                 working = working[:, 1:, :]
@@ -343,7 +485,13 @@ class PrithviEO2Lightning(BaseModel):
         self._last_patch_hw = (gh, gw)
         return feat
 
-    def forward(self, x: torch.Tensor, doys: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        doys: Optional[torch.Tensor] = None,
+        temporal_coords: Optional[torch.Tensor] = None,
+        location_coords: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         if x.ndim == 4:
             x = x.unsqueeze(1)
         x = x.float()
@@ -353,9 +501,18 @@ class PrithviEO2Lightning(BaseModel):
         self._last_patch_hw = (padded_h // self.patch_size, padded_w // self.patch_size)
         # x is [B, T, C, H, W] coming from your datamodule
         x = x.permute(0, 2, 1, 3, 4).contiguous()   # -> [B, C, T, H, W]
-        x = self.input_adapter(x)                   # 40 -> 6
+        x = self.input_adapter(x)                   # Map dataset channels to backbone expectation
         self._curr_input_hw = tuple(int(d) for d in x.shape[-2:])
-        backbone_output = self._forward_backbone(x)
+        batch_size = x.shape[0]
+        backbone_temporal = self._prepare_temporal_coords(
+            temporal_coords, doys, batch_size, x.device, x.dtype
+        )
+        backbone_location = self._prepare_location_coords(
+            location_coords, batch_size, x.device, x.dtype
+        )
+        backbone_output = self._forward_backbone(
+            x, temporal_coords=backbone_temporal, location_coords=backbone_location
+        )
         feature = self._extract_feature(backbone_output)
         feature = self._select_spatial_feature(feature)
         if feature.shape[1] != self.backbone_dim:
