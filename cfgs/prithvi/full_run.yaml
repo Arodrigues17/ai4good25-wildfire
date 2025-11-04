@@ -16,12 +16,12 @@ model:
     loss_function: BCE
     freeze_backbone: true
     temporal_pooling: conv
-    head_hidden_dim: 128
+    head_hidden_dim: 256
     prithvi_variant: "prithvi_eo_v2_600_tl"
     backbone_grad_checkpointing: true
     feature_fusion: sum
     backbone_lr_scale: 0.1
-    unfreeze_backbone_blocks: 0
+    unfreeze_backbone_blocks: 10
     backbone_indices: [7, 15, 23, 31]
 
 data:
