@@ -1,0 +1,37 @@
+# pytorch_lightning==2.0.1
+# Configuration file for ConvLSTM_Guillermo_v2 with enhanced features
+seed_everything: 0
+optimizer: 
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.003  # Higher initial learning rate
+    weight_decay: 0.01  # Regularization
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  init_args:
+    T_0: 10  # Restart every 10 epochs
+    T_mult: 2  # Double the period after each restart
+    eta_min: 0.0001  # Minimum learning rate
+model:
+  class_path: ConvLSTM_Guillermo_v2
+  init_args:
+    n_channels: 40
+    flatten_temporal_dimension: false
+    pos_class_weight: 236  # (relative frequency in augmented 2018 and 2020 fires)^-1
+    loss_function: "FocalDice"  # Combined Focal + Dice loss
+    focal_dice_weight: 0.5  # 0.5 Focal + 0.5 Dice
+    img_height_width: [128, 128]
+    kernel_sizes: [[3, 3], [3, 3], [3, 3]]
+    hidden_dims: [64, 128, 256]
+    num_layers: 3
+    pyramid_scales: [1, 2, 4, 8]  # 4 scales instead of 3
+    use_attention: true
+    use_residual: true
+    dropout_rate: 0.2  # Increased from 0.1
+    stochastic_depth_rate: 0.1  # New: random layer dropping
+    use_temporal_attention: true  # New: temporal attention
+    deep_supervision_weight: 0.5  # Increased from 0.3
+
+do_train: true
+do_test: true
+do_predict: false

@@ -25,9 +25,12 @@ class BaseModel(pl.LightningModule, ABC):
         n_channels: int,
         flatten_temporal_dimension: bool,
         pos_class_weight: float,
-        loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice"],
+        loss_function: Literal[
+            "BCE", "Focal", "Lovasz", "Jaccard", "Dice", "FocalDice"
+        ],
         use_doy: bool = False,
         required_img_size: Optional[Tuple[int, int]] = None,
+        focal_dice_weight: float = 0.5,  # Weight for Focal in FocalDice combination
         *args: Any,
         **kwargs: Any
     ):
@@ -38,9 +41,10 @@ class BaseModel(pl.LightningModule, ABC):
             except for U-Net which flattens the temporal dimension and uses this parameter as the total number of features.
             flatten_temporal_dimension (bool): _description_ Whether to flatten the temporal dimension of the input data.
             pos_class_weight (float): _description_ Weight of the positive class in the loss function (only used for BCE and Focal loss).
-            loss_function (Literal[&#39;BCE&#39;, &#39;Focal&#39;, &#39;Lovasz&#39;, &#39;Jaccard&#39;, &#39;Dice&#39;]): _description_ Which loss function to use.
+            loss_function (Literal[&#39;BCE&#39;, &#39;Focal&#39;, &#39;Lovasz&#39;, &#39;Jaccard&#39;, &#39;Dice&#39;, &#39;FocalDice&#39;]): _description_ Which loss function to use. FocalDice combines Focal and Dice losses.
             use_doy (bool, optional): _description_. Whether to use the doy of year (doy) as an additional input feature. Defaults to False.
             required_img_size (Optional[Tuple[int,int]], optional): _description_. Defaults to None.
+            focal_dice_weight (float, optional): Weight for Focal loss in FocalDice combination (1-weight for Dice). Defaults to 0.5.
             When using a model that requires a specific image size, this parameter can be used to indicate it. We assume models require square images,
             so this parameter indicates the side length. If set, the forward method will perform repeated inference on crops of the
             image, and aggregate the results. This also works for non-square images.
@@ -279,6 +283,9 @@ class BaseModel(pl.LightningModule, ABC):
             return JaccardLoss(mode="binary")
         elif self.hparams.loss_function == "Dice":
             return DiceLoss(mode="binary")
+        elif self.hparams.loss_function == "FocalDice":
+            # Return both losses as a tuple
+            return (sigmoid_focal_loss, DiceLoss(mode="binary"))
 
     def compute_loss(self, y_hat, y):
         if self.hparams.loss_function == "Focal":
@@ -300,5 +307,33 @@ class BaseModel(pl.LightningModule, ABC):
                 gamma=2,
                 reduction="mean",
             )
+        elif self.hparams.loss_function == "FocalDice":
+            # Combined loss: weighted combination of Focal and Dice
+            focal_loss_fn, dice_loss_fn = self.loss
+
+            # Compute Focal loss
+            pos_weight = self.hparams.pos_class_weight
+            if pos_weight > 1:
+                alpha = 1 - (pos_weight / (1 + pos_weight))
+            else:
+                alpha = 1 - pos_weight
+            alpha = max(0.0, min(1.0, alpha))
+
+            focal_loss = focal_loss_fn(
+                y_hat,
+                y.float(),
+                alpha=alpha,
+                gamma=2,
+                reduction="mean",
+            )
+
+            # Compute Dice loss
+            dice_loss = dice_loss_fn(y_hat, y.float())
+
+            # Combine with weights
+            focal_weight = self.hparams.focal_dice_weight
+            dice_weight = 1.0 - focal_weight
+
+            return focal_weight * focal_loss + dice_weight * dice_loss
         else:
             return self.loss(y_hat, y.float())
