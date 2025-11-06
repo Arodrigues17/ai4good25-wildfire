@@ -375,11 +375,12 @@ class MultiScaleBidirectionalConvLSTM(nn.Module):
 
         for layer_idx in range(self.num_layers):
             h_forward, h_backward = hidden_state[layer_idx]
-            output_forward = []
-            output_backward = []
+            output_inner = []
 
-            # Forward pass
+            # Process each timestep with bidirectional cell
             h_f, c_f = h_forward
+            h_b, c_b = h_backward
+
             for t in range(seq_len):
                 # Apply multi-scale pyramid pooling
                 current_input = cur_layer_input[:, t, :, :, :]
@@ -406,57 +407,27 @@ class MultiScaleBidirectionalConvLSTM(nn.Module):
                     and self.stochastic_depth_rate > 0
                     and torch.rand(1).item() < self.stochastic_depth_rate
                 ):
-                    # Skip this layer, just pass through
-                    h_out = fused_input
-                    c_f_next, c_b_next = c_f, h_backward[1]
+                    # Skip this layer, just pass through (need to match output dims)
+                    # Project to correct dimension if needed
+                    if fused_input.shape[1] != self.cell_list[layer_idx].hidden_dim * 2:
+                        # Use a simple projection
+                        h_out = fused_input
+                        # Pad or project to match expected output
+                        if hasattr(self, "_skip_proj_" + str(layer_idx)):
+                            h_out = getattr(self, "_skip_proj_" + str(layer_idx))(h_out)
+                    else:
+                        h_out = fused_input
                 else:
                     h_out, (c_f_next, c_b_next) = self.cell_list[layer_idx](
-                        fused_input, (h_f, c_f), h_backward
+                        fused_input, (h_f, c_f), (h_b, c_b)
                     )
                     c_f = c_f_next
-
-                output_forward.append(h_out)
-
-            # Backward pass
-            h_b, c_b = h_backward
-            for t in reversed(range(seq_len)):
-                current_input = cur_layer_input[:, t, :, :, :]
-                _, _, spatial_h, spatial_w = current_input.shape
-                pyramid_features = []
-
-                for pool in self.pyramid_pools:
-                    pooled = pool(current_input)
-                    upsampled = F.interpolate(
-                        pooled,
-                        size=(spatial_h, spatial_w),
-                        mode="bilinear",
-                        align_corners=False,
-                    )
-                    pyramid_features.append(upsampled)
-
-                pyramid_concat = torch.cat(pyramid_features, dim=1)
-                fused_input = self.pyramid_fusions[layer_idx](pyramid_concat)
-
-                if (
-                    self.training
-                    and self.stochastic_depth_rate > 0
-                    and torch.rand(1).item() < self.stochastic_depth_rate
-                ):
-                    h_out = fused_input
-                    c_b_next = c_b
-                else:
-                    h_out, (_, c_b_next) = self.cell_list[layer_idx](
-                        fused_input, (h_f, c_f_next), (h_b, c_b)
-                    )
                     c_b = c_b_next
 
-                output_backward.insert(0, h_out)
+                output_inner.append(h_out)
 
-            # Combine forward and backward outputs (simple average)
-            layer_output = torch.stack(
-                [(output_forward[t] + output_backward[t]) / 2 for t in range(seq_len)],
-                dim=1,
-            )
+            # Stack outputs
+            layer_output = torch.stack(output_inner, dim=1)
 
             # Apply temporal attention
             if self.use_temporal_attention:
@@ -471,7 +442,7 @@ class MultiScaleBidirectionalConvLSTM(nn.Module):
             cur_layer_input = layer_output
 
             layer_output_list.append(layer_output)
-            last_state_list.append([(h_f, c_f_next), (h_b, c_b_next)])
+            last_state_list.append([(h_f, c_f), (h_b, c_b)])
 
         if not self.return_all_layers:
             layer_output_list = layer_output_list[-1:]
