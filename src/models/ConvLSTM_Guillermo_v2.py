@@ -812,8 +812,8 @@ class ConvLSTM_Guillermo_v2(BaseModel):
 
         # Check if we have deep supervision prediction
         if hasattr(self, "_deep_sup_pred") and self._deep_sup_pred is not None:
-            # Ensure deep supervision prediction is float
-            deep_sup_pred = self._deep_sup_pred.float()
+            # Ensure deep supervision prediction is float and squeeze if needed
+            deep_sup_pred = self._deep_sup_pred.float().squeeze(1)
 
             # Deep supervision loss
             deep_sup_loss = self.compute_loss(deep_sup_pred, gt)
