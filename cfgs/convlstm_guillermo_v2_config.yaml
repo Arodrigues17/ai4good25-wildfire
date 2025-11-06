@@ -13,7 +13,7 @@ lr_scheduler:
     T_mult: 2  # Double the period after each restart
     eta_min: 0.0001  # Minimum learning rate
 model:
-  class_path: ConvLSTM_Guillermo_v2
+  class_path: models.ConvLSTM_Guillermo_v2.ConvLSTM_Guillermo_v2
   init_args:
     n_channels: 40
     flatten_temporal_dimension: false
