@@ -52,7 +52,7 @@ class EnhancedChannelSpatialAttention(nn.Module):
 
 
 class TemporalAttention(nn.Module):
-    """Temporal attention to weight different timesteps."""
+    """Temporal attention to weight different timesteps - operates on temporal dimension only."""
 
     def __init__(self, hidden_dim: int, num_heads: int = 4):
         super(TemporalAttention, self).__init__()
@@ -62,41 +62,53 @@ class TemporalAttention(nn.Module):
 
         assert hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads"
 
-        self.query = nn.Linear(hidden_dim, hidden_dim)
-        self.key = nn.Linear(hidden_dim, hidden_dim)
-        self.value = nn.Linear(hidden_dim, hidden_dim)
-        self.output = nn.Linear(hidden_dim, hidden_dim)
+        # Use 1x1 convolutions for efficiency
+        self.query = nn.Conv2d(hidden_dim, hidden_dim, 1)
+        self.key = nn.Conv2d(hidden_dim, hidden_dim, 1)
+        self.value = nn.Conv2d(hidden_dim, hidden_dim, 1)
+        self.output = nn.Conv2d(hidden_dim, hidden_dim, 1)
 
         self.scale = self.head_dim**-0.5
 
     def forward(self, x):
         """
         x: (batch, seq_len, hidden_dim, height, width)
+        Applies temporal attention by pooling spatial dimensions first.
         """
         b, t, c, h, w = x.shape
 
-        # Reshape for attention: flatten spatial dimensions
-        x_flat = x.permute(0, 1, 3, 4, 2).reshape(b, t * h * w, c)
+        # Global average pooling over spatial dimensions to get temporal features
+        # (b, t, c, h, w) -> (b, t, c)
+        x_temporal = F.adaptive_avg_pool2d(x.view(b * t, c, h, w), 1).view(b, t, c)
 
-        # Multi-head attention
-        q = self.query(x_flat).view(b, t * h * w, self.num_heads, self.head_dim)
-        k = self.key(x_flat).view(b, t * h * w, self.num_heads, self.head_dim)
-        v = self.value(x_flat).view(b, t * h * w, self.num_heads, self.head_dim)
+        # Reshape for multi-head attention: (b, t, c) -> (b, t, num_heads, head_dim)
+        q = x_temporal.view(b, t, self.num_heads, self.head_dim)
+        k = x_temporal.view(b, t, self.num_heads, self.head_dim)
+        v = x_temporal.view(b, t, self.num_heads, self.head_dim)
 
-        q = q.transpose(1, 2)  # (b, num_heads, t*h*w, head_dim)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
+        # Transpose for attention: (b, num_heads, t, head_dim)
+        q = q.permute(0, 2, 1, 3)
+        k = k.permute(0, 2, 1, 3)
+        v = v.permute(0, 2, 1, 3)
 
-        # Attention scores
+        # Attention scores: (b, num_heads, t, t)
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = F.softmax(attn, dim=-1)
 
-        # Apply attention
-        out = (attn @ v).transpose(1, 2).reshape(b, t * h * w, c)
-        out = self.output(out)
+        # Apply attention: (b, num_heads, t, head_dim)
+        out = attn @ v
 
-        # Reshape back
-        out = out.view(b, t, h, w, c).permute(0, 1, 4, 2, 3)
+        # Reshape back: (b, num_heads, t, head_dim) -> (b, t, c)
+        out = out.permute(0, 2, 1, 3).contiguous().view(b, t, c)
+
+        # Broadcast temporal attention weights to spatial dimensions
+        # (b, t, c) -> (b, t, c, 1, 1) -> (b, t, c, h, w)
+        temporal_weights = out.unsqueeze(-1).unsqueeze(-1)
+
+        # Apply weighted combination to original features
+        out = x * temporal_weights.sigmoid()  # Gated multiplication
+
+        return out
 
         return out
 
