@@ -28,7 +28,7 @@ model:
     use_attention: true
     use_residual: true
     dropout_rate: 0.2  # Increased from 0.1
-    stochastic_depth_rate: 0.1  # New: random layer dropping
+    stochastic_depth_rate: 0.0  # Disabled - was causing dimension mismatches
     use_temporal_attention: true  # New: temporal attention
     deep_supervision_weight: 0.5  # Increased from 0.3
 
