@@ -77,14 +77,23 @@ class TemporalAttention(nn.Module):
         """
         b, t, c, h, w = x.shape
 
+        # Adjust head_dim if needed based on actual channel dimension
+        actual_head_dim = c // self.num_heads
+        if c % self.num_heads != 0:
+            # If not divisible, use single head
+            num_heads = 1
+            actual_head_dim = c
+        else:
+            num_heads = self.num_heads
+
         # Global average pooling over spatial dimensions to get temporal features
         # (b, t, c, h, w) -> (b, t, c)
         x_temporal = F.adaptive_avg_pool2d(x.view(b * t, c, h, w), 1).view(b, t, c)
 
         # Reshape for multi-head attention: (b, t, c) -> (b, t, num_heads, head_dim)
-        q = x_temporal.view(b, t, self.num_heads, self.head_dim)
-        k = x_temporal.view(b, t, self.num_heads, self.head_dim)
-        v = x_temporal.view(b, t, self.num_heads, self.head_dim)
+        q = x_temporal.view(b, t, num_heads, actual_head_dim)
+        k = x_temporal.view(b, t, num_heads, actual_head_dim)
+        v = x_temporal.view(b, t, num_heads, actual_head_dim)
 
         # Transpose for attention: (b, num_heads, t, head_dim)
         q = q.permute(0, 2, 1, 3)
@@ -92,7 +101,8 @@ class TemporalAttention(nn.Module):
         v = v.permute(0, 2, 1, 3)
 
         # Attention scores: (b, num_heads, t, t)
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        scale = actual_head_dim**-0.5
+        attn = (q @ k.transpose(-2, -1)) * scale
         attn = F.softmax(attn, dim=-1)
 
         # Apply attention: (b, num_heads, t, head_dim)
