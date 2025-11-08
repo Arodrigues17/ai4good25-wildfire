@@ -6,6 +6,14 @@ command:
   - cfgs/convlstm_guillermo_v1_config.yaml
   - --trainer
   - cfgs/trainer_single_gpu.yaml
+  - --data
+  - cfgs/data_monotemporal_full_features.yaml
+  - --data.batch_size
+  - "15"
+  - --data.load_from_hdf5
+  - "true"
+  - --data.data_dir
+  - /zfs/ai4good/student/antrod/data/hdf5
   - ${args}
 method: grid
 metric:
