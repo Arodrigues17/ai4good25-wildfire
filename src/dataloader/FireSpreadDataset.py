@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Optional
+import math
 
 import rasterio
 from torch.utils.data import Dataset
@@ -48,9 +49,10 @@ class FireSpreadDataset(Dataset):
         return np.random.randint(0, total - window + 1)
     def __init__(self, data_dir: str, included_fire_years: List[int], n_leading_observations: int,
                  crop_side_length: int, load_from_hdf5: bool, is_train: bool, remove_duplicate_features: bool,
-                 stats_years: List[int], n_leading_observations_test_adjustment: Optional[int] = None, 
+                 stats_years: List[int], n_leading_observations_test_adjustment: Optional[int] = None,
                  features_to_keep: Optional[List[int]] = None, return_doy: bool = False,
-                 return_metadata: bool = False):
+                 return_metadata: bool = False, eval_pad_multiple: Optional[int] = 32,
+                 standardize_features: bool = True):
         """_summary_
 
         Args:
@@ -67,6 +69,9 @@ class FireSpreadDataset(Dataset):
             features_to_keep (Optional[List[int]], optional): _description_. List of feature indices from 0 to 39, indicating which features to keep. Defaults to None, which means using all features.
             return_doy (bool, optional): _description_. Return the day of the year per time step, as an additional feature. Defaults to False.
             return_metadata (bool, optional): _description_. If True, additionally return temporal metadata (year and day of year per frame) and scene centroid (lon, lat). Requires loading data from HDF5 files. Defaults to False.
+            eval_pad_multiple (Optional[int], optional): _description_. If provided, validation/test tiles are reflect-padded
+              so their height and width are multiples of this value (previously cropped to 32). Defaults to 32 to preserve the
+              legacy ResNet behaviour; set to None to disable any deterministic padding.
 
         Raises:
             ValueError: _description_ Raised if input values are not in the expected ranges.
@@ -85,6 +90,7 @@ class FireSpreadDataset(Dataset):
         self.n_leading_observations_test_adjustment = n_leading_observations_test_adjustment
         self.included_fire_years = included_fire_years
         self.data_dir = data_dir
+        self.standardize_features_enabled = standardize_features
 
         self.validate_inputs()
 
@@ -116,6 +122,8 @@ class FireSpreadDataset(Dataset):
         self.means = self.means[None, :, None, None]
         self.stds = self.stds[None, :, None, None]
         self.indices_of_degree_features = get_indices_of_degree_features()
+        self.eval_pad_multiple = eval_pad_multiple
+        self._warned_skip_dedup = False
 
     def find_image_index_from_dataset_index(self, target_id) -> (int, str, int):
         """_summary_ Given the index of a data point in the dataset, find the corresponding fire that contains it, 
@@ -244,6 +252,7 @@ class FireSpreadDataset(Dataset):
             found_fire_year, found_fire_name, in_fire_index)
 
         metadata = {}
+        doys = None
         if self.return_doy and self.return_metadata:
             x, y, doys, metadata = loaded_imgs
         elif self.return_doy:
@@ -258,22 +267,32 @@ class FireSpreadDataset(Dataset):
         # Remove duplicate static features, which can greatly reduce the number of features, since we use 
         # one-hot encoded landcover types. The result would have different amounts of feature channels per 
         # time step, therefore, we flatten the temporal dimension.
+        dedup_applied = False
         if self.remove_duplicate_features and self.n_leading_observations > 1:
-            x = self.flatten_and_remove_duplicate_features_(x)
+            if self.return_doy or self.return_metadata:
+                if not self._warned_skip_dedup:
+                    warnings.warn(
+                        "Requested duplicate-feature removal is incompatible with models that rely on temporal "
+                        "metadata/DOY, so it has been disabled for this dataset instance.",
+                        RuntimeWarning,
+                    )
+                    self._warned_skip_dedup = True
+            else:
+                x = self.flatten_and_remove_duplicate_features_(x)
+                dedup_applied = True
         
-        # Discard features that we don't want to use
-        elif self.features_to_keep is not None:
+        # Discard features that we don't want to use if we didn't collapse the temporal dimension above.
+        if not dedup_applied and self.features_to_keep is not None:
             if len(x.shape) != 4:
                 raise NotImplementedError(f"Removing features is only implemented for 4D tensors, but got {x.shape=}.")
             x = x[:, self.features_to_keep, ...]
 
-        if self.return_doy and metadata:
-            return x, y, doys, metadata
-        if self.return_doy:
-            return x, y, doys
+        sample = {"x": x, "y": y}
+        if self.return_doy and doys is not None:
+            sample["doys"] = doys
         if metadata:
-            return x, y, metadata
-        return x, y
+            sample.update(metadata)
+        return sample
 
     def __len__(self):
         return self.length
@@ -429,7 +448,7 @@ class FireSpreadDataset(Dataset):
         if self.is_train:
             x, y = self.augment(x, y)
         else:
-            x, y = self.center_crop_x32(x, y)
+            x, y = self._pad_eval_to_multiple(x, y)
 
         # Some features take values in [0,360] degrees. By applying sin, we make sure that values near 0 and 360 are
         # close in feature space, since they are also close in reality.
@@ -439,7 +458,8 @@ class FireSpreadDataset(Dataset):
         # Compute binary mask of active fire pixels before normalization changes what 0 means. 
         binary_af_mask = (x[:, -1:, ...] > 0).float()
 
-        x = self.standardize_features(x)
+        if self.standardize_features_enabled:
+            x = self.standardize_features(x)
 
         # Adds the binary fire mask as an additional channel to the input data.
         x = torch.cat([x, binary_af_mask], axis=1)
@@ -525,23 +545,18 @@ class FireSpreadDataset(Dataset):
 
         return x, y
 
-    def center_crop_x32(self, x, y):
-        """_summary_ Crops the center of the image to side lengths that are a multiple of 32, 
-        which the ResNet U-net architecture requires. Only used for computing the test performance.
-
-        Args:
-            x (_type_): _description_
-            y (_type_): _description_
-
-        Returns:
-            _type_: _description_
-        """
-        T, C, H, W = x.shape
-        H_new = H//32 * 32
-        W_new = W//32 * 32
-
-        x = TF.center_crop(x, (H_new, W_new))
-        y = TF.center_crop(y, (H_new, W_new))
+    def _pad_eval_to_multiple(self, x, y):
+        """Pad validation/test tiles up to the requested multiple instead of discarding pixels via cropping."""
+        if self.eval_pad_multiple is None or self.eval_pad_multiple <= 1:
+            return x, y
+        multiple = int(self.eval_pad_multiple)
+        H, W = x.shape[-2], x.shape[-1]
+        target_h = int(math.ceil(H / multiple) * multiple)
+        target_w = int(math.ceil(W / multiple) * multiple)
+        if target_h == H and target_w == W:
+            return x, y
+        x = self._pad_to_at_least_hw(x, target_h, target_w, mode="reflect")
+        y = self._pad_to_at_least_hw(y, target_h, target_w, mode="reflect")
         return x, y
 
     def flatten_and_remove_duplicate_features_(self, x):
