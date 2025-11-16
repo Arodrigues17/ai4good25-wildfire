@@ -3,7 +3,7 @@ seed_everything: 0
 optimizer:
   class_path: torch.optim.AdamW
   init_args:
-    lr: 5e-5
+    lr: 1e-4
     weight_decay: 0.01
 
 
@@ -14,14 +14,14 @@ model:
     flatten_temporal_dimension: false
     pos_class_weight: 1.0  # placeholder, overwritten per fold
     loss_function: BCE
-    freeze_backbone: true
+    freeze_backbone: false
     temporal_pooling: conv
     head_hidden_dim: 256
-    prithvi_variant: "prithvi_eo_v2_600_tl"
+    prithvi_variant: "prithvi_eo_v2_100_tl"
     backbone_grad_checkpointing: true
     feature_fusion: sum
-    backbone_lr_scale: 0.1
-    unfreeze_backbone_blocks: 10
+    backbone_lr_scale: 1.0
+    unfreeze_backbone_blocks: 32
     backbone_indices: [7, 15, 23, 31]
 
 data:
