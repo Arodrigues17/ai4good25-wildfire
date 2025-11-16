@@ -1,6 +1,6 @@
 data_dir: DATA_DIR_PATH
-batch_size: 2 #HERE
-eval_batch_size: 1
+batch_size: 4 #HERE
+eval_batch_size: 2
 n_leading_observations: 4
 crop_side_length: 112
 load_from_hdf5: true

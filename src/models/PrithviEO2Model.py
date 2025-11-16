@@ -13,10 +13,45 @@ from terratorch.registry import BACKBONE_REGISTRY
 
 
 class TemporalProjector(nn.Module):
-    def __init__(self, out_channels: int, mode: Literal["last", "mean", "max", "conv"] = "conv") -> None:
+    def __init__(
+        self,
+        out_channels: int,
+        mode: Literal["last", "mean", "max", "conv", "attn"] = "conv",
+        attention_heads: int = 4,
+    ) -> None:
         super().__init__()
         self.mode = mode
-        self.projector = nn.LazyConv2d(out_channels, kernel_size=1) if mode == "conv" else None
+        self.attention_heads = attention_heads
+        if mode == "conv":
+            self.projector = nn.Sequential(
+                nn.Conv3d(
+                    out_channels,
+                    out_channels,
+                    kernel_size=(3, 1, 1),
+                    padding=(1, 0, 0),
+                    groups=out_channels,
+                ),
+                nn.GELU(),
+                nn.Conv3d(
+                    out_channels,
+                    out_channels,
+                    kernel_size=(1, 3, 3),
+                    padding=(0, 1, 1),
+                    groups=out_channels,
+                ),
+                nn.GELU(),
+                nn.Conv3d(out_channels, out_channels, kernel_size=1),
+            )
+        elif mode == "attn":
+            if out_channels % attention_heads != 0:
+                raise ValueError(
+                    "Temporal attention requires the number of heads to divide the channel dimension."
+                )
+            self.attn = nn.MultiheadAttention(out_channels, attention_heads, batch_first=True)
+            self.attn_norm = nn.LayerNorm(out_channels)
+            self.projector = None
+        else:
+            self.projector = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.mode == "last":
@@ -26,8 +61,18 @@ class TemporalProjector(nn.Module):
         if self.mode == "max":
             return x.max(dim=1).values
         if self.mode == "conv":
+            if self.projector is None:
+                raise RuntimeError("Temporal conv projector not initialized.")
             b, t, c, h, w = x.shape
-            return self.projector(x.view(b, t * c, h, w))
+            mixed = self.projector(x.permute(0, 2, 1, 3, 4).contiguous())
+            return mixed.mean(dim=2)
+        if self.mode == "attn":
+            b, t, c, h, w = x.shape
+            tokens = x.permute(0, 3, 4, 1, 2).reshape(b * h * w, t, c)
+            attn_out, _ = self.attn(tokens, tokens, tokens)
+            attn_out = self.attn_norm(attn_out)
+            attn_out = attn_out.mean(dim=1)
+            return attn_out.view(b, h, w, c).permute(0, 3, 1, 2).contiguous()
         raise ValueError(f"Unsupported temporal pooling mode: {self.mode}")
 
 
@@ -59,7 +104,8 @@ class PrithviEO2Lightning(BaseModel):
         pos_class_weight: float,
         loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice"],
         freeze_backbone: bool = False,
-        temporal_pooling: Literal["last", "mean", "max", "conv"] = "conv",
+        temporal_pooling: Literal["last", "mean", "max", "conv", "attn"] = "conv",
+        temporal_attention_heads: int = 4,
         head_hidden_dim: int = 256,
         prithvi_variant: str = "prithvi_eo_v2_300",
         num_frames: int = 5,
@@ -88,6 +134,7 @@ class PrithviEO2Lightning(BaseModel):
         self.backbone_lr_scale = backbone_lr_scale
         self.unfreeze_backbone_blocks = max(0, int(unfreeze_backbone_blocks or 0))
         self._metadata_fallback_year = 2020.0
+        self._metadata_days_per_year = 366.0
         self.backbone_indices = backbone_indices or [5, 11, 17, 23]
         try:
             self.backbone = BACKBONE_REGISTRY.build(
@@ -120,7 +167,11 @@ class PrithviEO2Lightning(BaseModel):
             kernel_size=(1, 1, 1),
             bias=False,
         )
-        self.temporal_projector = TemporalProjector(self.backbone_dim, mode=temporal_pooling)
+        self.temporal_projector = TemporalProjector(
+            self.backbone_dim,
+            mode=temporal_pooling,
+            attention_heads=temporal_attention_heads,
+        )
         self.channel_adapter = nn.LazyConv2d(self.backbone_dim, kernel_size=1)
         self.decoder = nn.Sequential(
             nn.Conv2d(self.backbone_dim, head_hidden_dim, kernel_size=3, padding=1),
@@ -342,6 +393,8 @@ class PrithviEO2Lightning(BaseModel):
         dtype: torch.dtype,
     ) -> Optional[torch.Tensor]:
         coords = temporal_coords
+        if coords is not None and not isinstance(coords, torch.Tensor):
+            coords = torch.as_tensor(coords, dtype=dtype)
         if coords is None and doys is not None:
             if doys.dim() == 1:
                 doys = doys.unsqueeze(0)
@@ -354,7 +407,29 @@ class PrithviEO2Lightning(BaseModel):
             coords = coords.unsqueeze(0)
         if coords.shape[0] != batch_size:
             coords = coords.expand(batch_size, -1, -1)
-        return coords.to(device=device, dtype=dtype, non_blocking=True)
+        coords = coords.to(device=device, dtype=dtype, non_blocking=True)
+        coords = coords.contiguous()
+        coords = self._append_forecast_temporal_token(coords)
+        return coords
+
+    def _append_forecast_temporal_token(self, coords: torch.Tensor) -> torch.Tensor:
+        if coords.shape[1] == 0:
+            return coords
+        forecast = coords[:, -1:, :].clone()
+        forecast[..., 1] = forecast[..., 1] + 1.0
+        rollover = forecast[..., 1] >= self._metadata_days_per_year
+        if rollover.any():
+            forecast[..., 1] = torch.where(
+                rollover,
+                forecast[..., 1] - self._metadata_days_per_year,
+                forecast[..., 1],
+            )
+            forecast[..., 0] = torch.where(
+                rollover,
+                forecast[..., 0] + 1.0,
+                forecast[..., 0],
+            )
+        return torch.cat((coords, forecast), dim=1)
 
     def _prepare_location_coords(
         self,

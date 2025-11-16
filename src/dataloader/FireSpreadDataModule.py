@@ -1,6 +1,7 @@
 from pathlib import Path
 import math
 from functools import partial
+import warnings
 
 import numpy as np
 from pytorch_lightning import LightningDataModule
@@ -82,8 +83,18 @@ class FireSpreadDataModule(LightningDataModule):
 
         self.n_leading_observations_test_adjustment = n_leading_observations_test_adjustment
         self.data_fold_id = data_fold_id
-        self.return_doy = return_doy
-        self.return_metadata = return_metadata
+        if not return_doy:
+            warnings.warn(
+                "Prithvi-based experiments rely on day-of-year features; overriding return_doy=True.",
+                RuntimeWarning,
+            )
+        self.return_doy = True
+        if not return_metadata:
+            warnings.warn(
+                "Prithvi-based experiments require temporal/location metadata; overriding return_metadata=True.",
+                RuntimeWarning,
+            )
+        self.return_metadata = True
         # wandb apparently can't pass None values via the command line without turning them into a string, so we need this workaround
         self.features_to_keep = features_to_keep if type(
             features_to_keep) != str else None
