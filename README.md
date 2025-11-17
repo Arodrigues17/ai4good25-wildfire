@@ -173,6 +173,16 @@ python src/train.py \
   --do_test=true
 ```
 
+#### Choosing between 100 M, 300 M, and 600 M TL checkpoints
+
+The `docs/prithvi_variants.md` helper lists the memory footprint, recommended configs, and launch examples for all Prithvi-EO-2.0 variants. In short:
+
+* Stick to `cfgs/prithvi/prithvi.yaml` for the 100 M TL model when you only have ~16 GB of VRAM.
+* Use `cfgs/prithvi/prithvi_300_tl.yaml` (300 M TL) once you can keep batch sizes of at least 2 and want higher accuracy.
+* Switch to `cfgs/prithvi/prithvi_600_tl.yaml` together with `cfgs/data_multitemporal_prithvi_600.yaml` on 40 GB GPUs; keep the dataloader batch size at 1 and rely on gradient accumulation to reach the desired effective batch size.
+
+The Lightning module now infers suitable `backbone_indices` for each checkpoint depth, so you only need to override that list when experimenting with custom feature fusions.
+
 #### Troubleshooting
 
 **NumPy compatibility error** (`_ARRAY_API not found`):
