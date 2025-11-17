@@ -25,8 +25,12 @@ def _pad_spatial_tensor(tensor: torch.Tensor, target_h: int, target_w: int) -> t
     pad_w = target_w - tensor.shape[-1]
     if pad_h == 0 and pad_w == 0:
         return tensor.clone()
-    # Pad only along the last two spatial dimensions
-    return F.pad(tensor, (0, pad_w, 0, pad_h), mode="reflect")
+    orig_shape = tensor.shape
+    lead_dims = orig_shape[:-2]
+    flat = tensor.reshape(-1, orig_shape[-2], orig_shape[-1])
+    padded = F.pad(flat, (0, pad_w, 0, pad_h), mode="reflect")
+    new_h, new_w = padded.shape[-2:]
+    return padded.reshape(*lead_dims, new_h, new_w)
 
 
 def wildfire_collate(batch, pad_multiple: int = 1):
