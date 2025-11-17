@@ -76,6 +76,35 @@ class TemporalProjector(nn.Module):
         raise ValueError(f"Unsupported temporal pooling mode: {self.mode}")
 
 
+class ForecastAwareTemporalEncoder(nn.Module):
+    """Wraps the backbone's temporal encoder to support forecast-only metadata tokens."""
+
+    def __init__(self, base_encoder: nn.Module, observed_frames: int) -> None:
+        super().__init__()
+        self.base_encoder = base_encoder
+        self.observed_frames = max(1, int(observed_frames))
+
+    def forward(self, temporal_coords: Optional[torch.Tensor], tokens_per_frame: Optional[int] = None):
+        if temporal_coords is None:
+            return self.base_encoder(temporal_coords, tokens_per_frame)
+
+        observed = temporal_coords[:, : self.observed_frames, :]
+        forecast = temporal_coords[:, self.observed_frames :, :]
+
+        if observed.shape[1] == 0:
+            return self.base_encoder(temporal_coords, tokens_per_frame)
+
+        encoding = self.base_encoder(observed, tokens_per_frame)
+        if forecast.shape[1] == 0:
+            return encoding
+
+        forecast_embedding = self.base_encoder(forecast[:, :1, :], tokens_per_frame=None)
+        if forecast_embedding.dim() == 2:
+            forecast_embedding = forecast_embedding.unsqueeze(1)
+        encoding = encoding + forecast_embedding.expand_as(encoding)
+        return encoding
+
+
 class _CheckpointWrapper(nn.Module):
     """Wraps a module to execute it under torch.utils.checkpoint."""
 
@@ -148,6 +177,7 @@ class PrithviEO2Lightning(BaseModel):
                 "Ensure terratorch is installed (`pip install terratorch`)."
             ) from exc
         self._wrap_backbone_pos_encoding()
+        self._wrap_backbone_temporal_encoder()
         self.backbone_grad_checkpointing = backbone_grad_checkpointing
         if self.backbone_grad_checkpointing:
             self._enable_backbone_grad_checkpointing()
@@ -267,6 +297,19 @@ class PrithviEO2Lightning(BaseModel):
         _wrap(self.backbone)
         decoder = getattr(self.backbone, "decoder", None)
         _wrap(decoder)
+
+    def _wrap_backbone_temporal_encoder(self) -> None:
+        def _apply(module: Optional[nn.Module]) -> None:
+            if module is None:
+                return
+            encoder = getattr(module, "temporal_embed_enc", None)
+            if isinstance(encoder, ForecastAwareTemporalEncoder):
+                return
+            if isinstance(encoder, nn.Module):
+                module.temporal_embed_enc = ForecastAwareTemporalEncoder(encoder, self.num_frames)
+
+        _apply(self.backbone)
+        _apply(getattr(self.backbone, "model", None))
 
     def _enable_backbone_grad_checkpointing(self) -> None:
         candidates = [self.backbone, getattr(self.backbone, "model", None)]

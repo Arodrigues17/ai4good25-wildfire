@@ -14,10 +14,10 @@ model:
     flatten_temporal_dimension: false
     pos_class_weight: 1.0  # placeholder, overwritten per fold
     loss_function: BCE
-    freeze_backbone: false
+    freeze_backbone: true
     temporal_pooling: conv
     head_hidden_dim: 256
-    prithvi_variant: "prithvi_eo_v2_100_tl"
+    prithvi_variant: "prithvi_eo_v2_300_tl"
     backbone_grad_checkpointing: true
     feature_fusion: sum
     backbone_lr_scale: 1.0
