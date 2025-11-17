@@ -164,7 +164,6 @@ class PrithviEO2Lightning(BaseModel):
         self.unfreeze_backbone_blocks = max(0, int(unfreeze_backbone_blocks or 0))
         self._metadata_fallback_year = 2020.0
         self._metadata_days_per_year = 366.0
-        self.backbone_indices = backbone_indices or [5, 11, 17, 23]
         try:
             self.backbone = BACKBONE_REGISTRY.build(
                 prithvi_variant,
@@ -182,6 +181,20 @@ class PrithviEO2Lightning(BaseModel):
         if self.backbone_grad_checkpointing:
             self._enable_backbone_grad_checkpointing()
         self._apply_backbone_freeze()
+        self.backbone_depth = self._infer_backbone_depth()
+        auto_indices = (
+            backbone_indices
+            if backbone_indices is not None
+            else self._default_backbone_indices(self.backbone_depth)
+        )
+        self.backbone_indices = auto_indices
+        if backbone_indices is None:
+            depth_msg = (
+                f" (depth={self.backbone_depth})" if self.backbone_depth is not None else ""
+            )
+            self.print(
+                f"[PrithviEO2Lightning] Using automatically inferred backbone indices{depth_msg}: {self.backbone_indices}"
+            )
         self.backbone_dim = int(getattr(self.backbone, "embed_dim", getattr(self.backbone, "hidden_size", 768)))
         self.patch_size = getattr(self.backbone, "patch_size", 16)
         if isinstance(self.patch_size, (tuple, list)):
@@ -235,6 +248,31 @@ class PrithviEO2Lightning(BaseModel):
             if isinstance(blocks, nn.ModuleList):
                 return blocks
         return None
+
+    def _infer_backbone_depth(self) -> Optional[int]:
+        blocks = self._resolve_backbone_blocks()
+        if blocks is None:
+            return None
+        return len(blocks)
+
+    @staticmethod
+    def _default_backbone_indices(depth: Optional[int]) -> list[int]:
+        """Generate evenly spaced feature indices given the backbone depth."""
+
+        fallback = [5, 11, 17, 23]
+        if depth is None or depth <= 0:
+            return fallback
+        if depth <= 4:
+            return list(range(depth))
+
+        quartiles = []
+        for i in range(1, 5):
+            position = ((i * depth) // 4) - 1
+            quartiles.append(max(0, min(depth - 1, position)))
+        quartiles = sorted(set(quartiles))
+        if quartiles[-1] != depth - 1:
+            quartiles[-1] = depth - 1
+        return quartiles
 
     def _unfreeze_backbone_tail(self, n_blocks: int) -> None:
         blocks = self._resolve_backbone_blocks()
