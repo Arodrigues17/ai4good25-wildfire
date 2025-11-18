@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
+from pytorch_lightning.utilities.rank_zero import rank_zero_info
 
 from .BaseModel import BaseModel
 from terratorch.registry import BACKBONE_REGISTRY
@@ -192,7 +193,7 @@ class PrithviEO2Lightning(BaseModel):
             depth_msg = (
                 f" (depth={self.backbone_depth})" if self.backbone_depth is not None else ""
             )
-            self.print(
+            rank_zero_info(
                 f"[PrithviEO2Lightning] Using automatically inferred backbone indices{depth_msg}: {self.backbone_indices}"
             )
         self.backbone_dim = int(getattr(self.backbone, "embed_dim", getattr(self.backbone, "hidden_size", 768)))
@@ -226,8 +227,8 @@ class PrithviEO2Lightning(BaseModel):
         self._last_patch_hw = None
         self._curr_input_hw = None
 
-        self.print(
-            "[PrithviEO2Lightning] Loaded {variant} (frames={frames}, input_channels="
+        rank_zero_info(
+            "[PrithviEO2Lightning] Loaded {variant} (frames={frames}, input_channels"
             " {in_ch}->{bb_in}, embed_dim={embed}, fusion={fusion}).".format(
                 variant=self.prithvi_variant,
                 frames=self.num_frames,
