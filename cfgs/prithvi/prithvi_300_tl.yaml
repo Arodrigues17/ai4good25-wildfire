@@ -1,0 +1,32 @@
+seed_everything: 0
+
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 1e-4
+    weight_decay: 0.01
+
+
+model:
+  class_path: models.PrithviEO2Model.PrithviEO2Lightning
+  init_args:
+    n_channels: 0  # overwritten by LightningCLI before instantiation
+    flatten_temporal_dimension: false
+    pos_class_weight: 1.0  # placeholder, overwritten per fold
+    loss_function: BCE
+    freeze_backbone: true
+    temporal_pooling: conv
+    head_hidden_dim: 192
+    prithvi_variant: "prithvi_eo_v2_300_tl"
+    backbone_grad_checkpointing: true
+    feature_fusion: last
+    backbone_lr_scale: 1.0
+    unfreeze_backbone_blocks: 12
+    backbone_indices: null
+
+data:
+  return_metadata: true
+
+do_train: true
+do_test: true
+do_predict: false
