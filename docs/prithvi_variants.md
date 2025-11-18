@@ -15,7 +15,6 @@ This guide summarizes how the Prithvi-EO-2.0 transformers that ship with TerraTo
 * **Backbone indices are inferred automatically.** The `PrithviEO2Lightning` module now detects the backbone depth at runtime and selects four evenly spaced hidden states whenever `backbone_indices` is not provided. This removes the need to keep separate index lists for the 100 M, 300 M, and 600 M checkpoints while still matching the defaults used in the paper release. See `src/models/PrithviEO2Model.py` for details.
 * **Set `num_frames` to match the datamodule.** The Lightning CLI already links `model.init_args.num_frames` to `data.n_leading_observations`, so you only need to override it when experimenting with different temporal windows.
 * **Prefer gradient checkpointing and backbone freezing for the larger models.** The 300 M and 600 M checkpoints both benefit greatly from enabling `backbone_grad_checkpointing` and from freezing most transformer blocks (`unfreeze_backbone_blocks ≤ 6`) so that activations do not need to be stored for every layer.
-* **Use `feature_fusion: last` when chasing lower VRAM.** Concatenating four backbone stages multiplies the channel dimension (and thus decoder activations) by ~4×. All shipped configs therefore default to `last` fusion unless you explicitly opt back into multi-scale heads.
 
 ## Memory-friendly hyper-parameters
 
