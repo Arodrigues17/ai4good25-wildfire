@@ -225,6 +225,18 @@ class PrithviEO2Lightning(BaseModel):
         )
         self._last_patch_hw = None
         self._curr_input_hw = None
+
+        self.print(
+            "[PrithviEO2Lightning] Loaded {variant} (frames={frames}, input_channels="
+            " {in_ch}->{bb_in}, embed_dim={embed}, fusion={fusion}).".format(
+                variant=self.prithvi_variant,
+                frames=self.num_frames,
+                in_ch=n_channels,
+                bb_in=self.backbone_in_channels,
+                embed=self.backbone_dim,
+                fusion=self.feature_fusion,
+            )
+        )
     
     def _apply_backbone_freeze(self) -> None:
         if not self.freeze_backbone:

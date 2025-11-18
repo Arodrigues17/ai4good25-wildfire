@@ -148,12 +148,13 @@ model:
   class_path: models.PrithviEO2Model.PrithviEO2Lightning
   init_args:
     loss_function: BCE
-    freeze_backbone: true
+    freeze_backbone: false
     temporal_pooling: conv
     head_hidden_dim: 256
-    prithvi_variant: "prithvi_eo_v2_300"
-    num_frames: 5  # Match to n_leading_observations in data config
-    backbone_indices: [5, 11, 17, 23]  # Feature extraction layers for 300M model
+    prithvi_variant: "prithvi_eo_v2_100_tl"
+    num_frames: 4  # LightningCLI overwrites this with data.n_leading_observations
+    feature_fusion: last
+    backbone_indices: null  # Let the LightningModule infer reasonable feature taps
 ```
 
 #### Training
@@ -178,7 +179,7 @@ python src/train.py \
 The `docs/prithvi_variants.md` helper lists the memory footprint, recommended configs, and launch examples for all Prithvi-EO-2.0 variants. In short:
 
 * Stick to `cfgs/prithvi/prithvi.yaml` for the 100 M TL model when you only have ~16 GB of VRAM.
-* Use `cfgs/prithvi/prithvi_300_tl.yaml` (300 M TL) once you can keep batch sizes of at least 2 and want higher accuracy.
+* Use `cfgs/prithvi/prithvi_300_tl.yaml` (300 M TL) when you have ≥32 GB of VRAM and want to **fully finetune** the backbone with attention-based temporal pooling and multi-scale decoder fusion.
 * Switch to `cfgs/prithvi/prithvi_600_tl.yaml` together with `cfgs/data_multitemporal_prithvi_600.yaml` on 40 GB GPUs; keep the dataloader batch size at 1 and rely on gradient accumulation to reach the desired effective batch size.
 
 The Lightning module now infers suitable `backbone_indices` for each checkpoint depth, so you only need to override that list when experimenting with custom feature fusions.
