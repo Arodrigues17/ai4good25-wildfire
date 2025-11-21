@@ -8,6 +8,12 @@ command:
   - cfgs/trainer_single_gpu.yaml
   - --data
   - cfgs/data_monotemporal_full_features.yaml
+  - --data.batch_size
+  - "12"
+  - --data.load_from_hdf5
+  - "true"
+  - --data.data_dir
+  - /zfs/ai4good/student/antrod/data/hdf5
   - ${args}
 method: grid
 metric:
@@ -16,26 +22,9 @@ metric:
 parameters:
   data.data_fold_id:
     values:
-      - 0
-      - 1
       - 2
-      - 3
-      - 4
-      - 5
       - 6
-      - 7
-      - 8
-      - 9
-      - 10
       - 11
-  data.n_leading_observations:
-    value: 1
-  data.batch_size:
-    value: 12  # v2 model needs smaller batch size
-  trainer.max_epochs:
-    value: 150  # Same as full training
-  trainer.early_stopping.patience:
-    value: 20
   do_test:
     value: True
 program: src/train.py
