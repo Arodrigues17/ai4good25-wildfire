@@ -10,7 +10,7 @@ import torchmetrics
 import wandb
 from segmentation_models_pytorch.losses import DiceLoss, JaccardLoss, LovaszLoss
 from torchvision.ops import sigmoid_focal_loss
-
+from .PhysicsBasedLoss import PhysicsBasedLoss
 from .EvaluationMetrics import MyTestMetrics
 
 
@@ -25,9 +25,7 @@ class BaseModel(pl.LightningModule, ABC):
         n_channels: int,
         flatten_temporal_dimension: bool,
         pos_class_weight: float,
-        loss_function: Literal[
-            "BCE", "Focal", "Lovasz", "Jaccard", "Dice", "FocalDice"
-        ],
+        loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice", "PhysicsBasedLoss_relu", "PhysicsBasedLoss_leaky_relu", "PhysicsBasedLoss_squared"],
         use_doy: bool = False,
         required_img_size: Optional[Tuple[int, int]] = None,
         focal_dice_weight: float = 0.5,  # Weight for Focal in FocalDice combination
@@ -283,6 +281,12 @@ class BaseModel(pl.LightningModule, ABC):
             return JaccardLoss(mode="binary")
         elif self.hparams.loss_function == "Dice":
             return DiceLoss(mode="binary")
+        elif self.hparams.loss_function == "PhysicsBasedLoss_relu":
+            return PhysicsBasedLoss(pos_weight=self.hparams.pos_class_weight, activation_fn="relu")
+        elif self.hparams.loss_function == "PhysicsBasedLoss_leaky_relu":
+            return PhysicsBasedLoss(pos_weight=self.hparams.pos_class_weight, activation_fn="leaky_relu")
+        elif self.hparams.loss_function == "PhysicsBasedLoss_squared":
+            return PhysicsBasedLoss(pos_weight=self.hparams.pos_class_weight, activation_fn="squared")
         elif self.hparams.loss_function == "FocalDice":
             # Return both losses as a tuple
             return (sigmoid_focal_loss, DiceLoss(mode="binary"))
@@ -335,5 +339,8 @@ class BaseModel(pl.LightningModule, ABC):
             dice_weight = 1.0 - focal_weight
 
             return focal_weight * focal_loss + dice_weight * dice_loss
+        elif "PhysicsBasedLoss" in self.hparams.loss_function:
+            # Pass the latest input x so physics-based multiplicative factor can be computed
+            return self.loss(y_hat, y.float(), x=self._last_x)
         else:
             return self.loss(y_hat, y.float())

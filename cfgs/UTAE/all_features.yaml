@@ -11,7 +11,7 @@ model:
     n_channels: 40
     flatten_temporal_dimension: false
     pos_class_weight: 10
-    loss_function: "BCE"
+    loss_function: "PhysicsBasedLoss_squared"
 do_train: true
 do_test: true
 do_predict: false
