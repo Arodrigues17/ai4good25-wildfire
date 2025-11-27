@@ -1,6 +1,9 @@
 .vscode/
 lightning_logs/
 wandb/
+.wandb
+
+
 # Byte-compiled / optimized / DLL files
 todo.txt
 __pycache__/
@@ -136,3 +139,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Temporary files
+tmp/
+.wandb_cache/
