@@ -12,6 +12,7 @@ from segmentation_models_pytorch.losses import (DiceLoss, JaccardLoss,
                                                 LovaszLoss)
 
 from torchvision.ops import sigmoid_focal_loss
+from .PhysicsBasedLoss import PhysicsBasedLoss
 from .EvaluationMetrics import MyTestMetrics
 
 class BaseModel(pl.LightningModule, ABC):
@@ -24,7 +25,7 @@ class BaseModel(pl.LightningModule, ABC):
         n_channels: int,
         flatten_temporal_dimension: bool,
         pos_class_weight: float,
-        loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice"],
+        loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice", "PhysicsBasedLoss_relu", "PhysicsBasedLoss_leaky_relu", "PhysicsBasedLoss_squared"],
         use_doy: bool = False,
         required_img_size: Optional[Tuple[int, int]] = None,
         *args: Any,
@@ -46,6 +47,8 @@ class BaseModel(pl.LightningModule, ABC):
         """
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
+        # Holds the latest full input tensor to enable physics-based loss terms
+        self._last_x = None
 
         if required_img_size is not None:
             self.hparams.required_img_size = torch.Size(
@@ -119,7 +122,7 @@ class BaseModel(pl.LightningModule, ABC):
 
                 for i in range(n_H):
                     for j in range(n_W):
-                        
+
                         # If we reach the bottom edge of the image, align the crop window with the bottom edge of the image
                         if i == n_H - 1:
                             H1 = H - H_req
@@ -136,13 +139,16 @@ class BaseModel(pl.LightningModule, ABC):
                             W2 = (j + 1) * W_req
 
                         x_crop = x[:, :, :, H1:H2, W1:W2]
-
                         agg_output[:, H1:H2, W1:W2] = self(x_crop, doys).squeeze(1)
 
                 y_hat = agg_output
+                # Save latest input for potential physics-based loss usage
+                self._last_x = x
                 return y_hat, y
 
         y_hat = self(x, doys).squeeze(1)
+        # Save latest input for potential physics-based loss usage
+        self._last_x = x
 
         return y_hat, y
 
@@ -278,6 +284,12 @@ class BaseModel(pl.LightningModule, ABC):
             return JaccardLoss(mode="binary")
         elif self.hparams.loss_function == "Dice":
             return DiceLoss(mode="binary")
+        elif self.hparams.loss_function == "PhysicsBasedLoss_relu":
+            return PhysicsBasedLoss(pos_weight=self.hparams.pos_class_weight, activation_fn="relu")
+        elif self.hparams.loss_function == "PhysicsBasedLoss_leaky_relu":
+            return PhysicsBasedLoss(pos_weight=self.hparams.pos_class_weight, activation_fn="leaky_relu")
+        elif self.hparams.loss_function == "PhysicsBasedLoss_squared":
+            return PhysicsBasedLoss(pos_weight=self.hparams.pos_class_weight, activation_fn="squared")
 
     def compute_loss(self, y_hat, y):
         if self.hparams.loss_function == "Focal":
@@ -288,6 +300,9 @@ class BaseModel(pl.LightningModule, ABC):
                 gamma=2,
                 reduction="mean",
             )
+        elif "PhysicsBasedLoss" in self.hparams.loss_function:
+            # Pass the latest input x so physics-based multiplicative factor can be computed
+            return self.loss(y_hat, y.float(), x=self._last_x)
         else:
             return self.loss(y_hat, y.float())
 

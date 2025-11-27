@@ -61,7 +61,7 @@ class FireSpreadDataModule(LightningDataModule):
                                                load_from_hdf5=self.load_from_hdf5, is_train=True,
                                                remove_duplicate_features=self.remove_duplicate_features,
                                                features_to_keep=self.features_to_keep, return_doy=self.return_doy,
-                                               stats_years=train_years)
+                                               stats_years=train_years, use_gaussian_targets=True)
         self.val_dataset = FireSpreadDataset(data_dir=self.data_dir, included_fire_years=val_years,
                                              n_leading_observations=self.n_leading_observations,
                                              n_leading_observations_test_adjustment=None,
@@ -69,7 +69,7 @@ class FireSpreadDataModule(LightningDataModule):
                                              load_from_hdf5=self.load_from_hdf5, is_train=True,
                                              remove_duplicate_features=self.remove_duplicate_features,
                                              features_to_keep=self.features_to_keep, return_doy=self.return_doy,
-                                             stats_years=train_years)
+                                             stats_years=train_years, use_gaussian_targets=True)
         self.test_dataset = FireSpreadDataset(data_dir=self.data_dir, included_fire_years=test_years,
                                               n_leading_observations=self.n_leading_observations,
                                               n_leading_observations_test_adjustment=self.n_leading_observations_test_adjustment,
@@ -77,7 +77,7 @@ class FireSpreadDataModule(LightningDataModule):
                                               load_from_hdf5=self.load_from_hdf5, is_train=False,
                                               remove_duplicate_features=self.remove_duplicate_features,
                                               features_to_keep=self.features_to_keep, return_doy=self.return_doy,
-                                              stats_years=train_years)
+                                              stats_years=train_years, use_gaussian_targets=False)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True)

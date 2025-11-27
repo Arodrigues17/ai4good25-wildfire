@@ -5,6 +5,7 @@ import rasterio
 from torch.utils.data import Dataset
 import torch
 import numpy as np
+import torch.nn.functional as F
 from torch.utils.data.dataset import T_co
 import glob
 import warnings
@@ -18,7 +19,8 @@ class FireSpreadDataset(Dataset):
     def __init__(self, data_dir: str, included_fire_years: List[int], n_leading_observations: int,
                  crop_side_length: int, load_from_hdf5: bool, is_train: bool, remove_duplicate_features: bool,
                  stats_years: List[int], n_leading_observations_test_adjustment: Optional[int] = None, 
-                 features_to_keep: Optional[List[int]] = None, return_doy: bool = False):
+                 features_to_keep: Optional[List[int]] = None, return_doy: bool = False,
+                 use_gaussian_targets: bool = False, gaussian_sigma: float = 3.0):
         """_summary_
 
         Args:
@@ -51,6 +53,8 @@ class FireSpreadDataset(Dataset):
         self.n_leading_observations_test_adjustment = n_leading_observations_test_adjustment
         self.included_fire_years = included_fire_years
         self.data_dir = data_dir
+        self.use_gaussian_targets = use_gaussian_targets
+        self.gaussian_sigma = gaussian_sigma
 
         self.validate_inputs()
 
@@ -325,7 +329,7 @@ class FireSpreadDataset(Dataset):
             # Turn active fire detection time from hhmm to hh.
             x[:, -1, ...] = torch.floor_divide(x[:, -1, ...], 100)
 
-        y = (y > 0).long()
+        y = (y > 0).float() 
 
         # Augmentation has to come before normalization, because we have to correct the angle features when we change
         # the orientation of the image.
