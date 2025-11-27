@@ -88,7 +88,7 @@ class BaseModel(pl.LightningModule, ABC):
         """
 
         # UTAE and TSViT use an additional doy feature as input. 
-        if self.hparams.use_doy:
+        if len(batch) == 3:
             x, y, doys = batch
         else:
             x, y = batch

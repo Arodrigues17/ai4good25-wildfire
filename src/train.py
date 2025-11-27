@@ -22,6 +22,7 @@ class MyLightningCLI(LightningCLI):
                               "trainer.logger.init_args.save_dir")
         parser.link_arguments("model.class_path",
                               "trainer.logger.init_args.name")
+        parser.link_arguments("data.n_leading_observations", "model.init_args.n_leading_observations")
         parser.add_argument("--do_train", type=bool,
                             help="If True: skip training the model.")
         parser.add_argument("--do_predict", type=bool,
@@ -45,6 +46,13 @@ class MyLightningCLI(LightningCLI):
             self.config.data.n_leading_observations,
             self.config.data.features_to_keep,
             self.config.data.remove_duplicate_features)
+        
+        # If the model flattens the temporal dimension, we need to multiply the number of features by the number of observations
+        # (unless they were already flattened by get_n_features, which happens if remove_duplicate_features is True)
+        if self.config.model.init_args.get('flatten_temporal_dimension', False):
+            if not self.config.data.remove_duplicate_features:
+                n_features *= self.config.data.n_leading_observations
+
         self.config.model.init_args.n_channels = n_features
 
         # The exact positive class weight changes with the data fold in the data module, but the weight is needed to instantiate the model.
