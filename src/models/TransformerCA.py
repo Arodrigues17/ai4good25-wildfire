@@ -11,7 +11,8 @@ class TransformerCAModule(nn.Module):
         self.padding = kernel_size // 2
         
         # Input projection: Maps input features to d_model
-        self.embedding = nn.Linear(in_channels, d_model)
+        # We use Conv2d with kernel_size=1 to project before unfolding
+        self.embedding = nn.Conv2d(in_channels, d_model, kernel_size=1)
         
         # Learnable positional encoding for the local window
         self.pos_embed = nn.Parameter(torch.zeros(1, kernel_size*kernel_size, d_model))
@@ -39,28 +40,22 @@ class TransformerCAModule(nn.Module):
         
         B, C, H, W = x.shape
         
+        # Project to d_model first (B, d_model, H, W)
+        x = self.embedding(x)
+        
         # Extract local patches
-        # unfold: (B, C, H, W) -> (B, C*K*K, L), where L=H*W
+        # unfold: (B, d_model, H, W) -> (B, d_model*K*K, L), where L=H*W
         patches = torch.nn.functional.unfold(x, kernel_size=self.kernel_size, padding=self.padding)
         
-        # Reshape to (B*L, K*K, C)
-        # 1. Transpose to (B, L, C*K*K)
+        # Reshape to (B*L, K*K, d_model)
+        # 1. Transpose to (B, L, d_model*K*K)
         patches = patches.transpose(1, 2)
-        # 2. View as (B, L, C, K*K) - Note: unfold flattens as channel, then spatial
-        patches = patches.view(B, H*W, C, self.kernel_size*self.kernel_size)
-        # 3. Permute to (B, L, K*K, C)
+        # 2. View as (B, L, d_model, K*K)
+        patches = patches.view(B, H*W, -1, self.kernel_size*self.kernel_size)
+        # 3. Permute to (B, L, K*K, d_model)
         patches = patches.permute(0, 1, 3, 2)
-        # 4. Flatten batch and spatial: (B*H*W, K*K, C)
-        # Note: We need to be careful with batch size for Transformer
-        # If B*H*W is too large, it might cause issues.
-        # But here the sequence length is small (K*K = 9), so it should be fine.
-        # However, the batch dimension for the transformer is B*H*W, which can be huge (e.g. 16*128*128 = 262144).
-        # This might be causing the CUDA error if it exceeds some internal limit.
-        
-        patches = patches.reshape(-1, self.kernel_size*self.kernel_size, C)
-        
-        # Embedding
-        x = self.embedding(patches) # (B*HW, K*K, d_model)
+        # 4. Flatten batch and spatial: (B*H*W, K*K, d_model)
+        x = patches.reshape(-1, self.kernel_size*self.kernel_size, x.shape[1])
         
         # Add positional encoding
         x = x + self.pos_embed
@@ -72,7 +67,7 @@ class TransformerCAModule(nn.Module):
         # With B*H*W ~ 260k, it might be hitting limits.
         
         # Let's try to process in chunks to avoid this.
-        chunk_size = 1024 # Reduced chunk size to avoid OOM
+        chunk_size = 4096 # Increased chunk size since we reduced d_model
         outputs = []
         for i in range(0, x.shape[0], chunk_size):
             chunk = x[i:i+chunk_size]

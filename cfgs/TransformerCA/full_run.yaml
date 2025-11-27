@@ -11,9 +11,10 @@ model:
         # n_channels is injected by train.py
     flatten_temporal_dimension: true
     loss_function: BCE
-    d_model: 128
+    d_model: 64
     nhead: 4
-    num_layers: 4
+    num_layers: 2
+    lr: 1e-4
     kernel_size: 3
     use_doy: false
     # n_leading_observations is injected by train.py
