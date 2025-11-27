@@ -28,7 +28,7 @@ def _pad_spatial_tensor(tensor: torch.Tensor, target_h: int, target_w: int) -> t
     orig_shape = tensor.shape
     lead_dims = orig_shape[:-2]
     flat = tensor.reshape(-1, orig_shape[-2], orig_shape[-1])
-    padded = F.pad(flat, (0, pad_w, 0, pad_h), mode="reflect")
+    padded = F.pad(flat, (0, pad_w, 0, pad_h), mode="constant", value=0)
     new_h, new_w = padded.shape[-2:]
     return padded.reshape(*lead_dims, new_h, new_w)
 
@@ -118,6 +118,9 @@ class FireSpreadDataModule(LightningDataModule):
         pad_multiple = 1
         if self.eval_pad_multiple and self.eval_pad_multiple > 1:
             pad_multiple = int(self.eval_pad_multiple)
+            # Ensure compatibility with Prithvi (patch 14) and UNet (32)
+            if pad_multiple == 32:
+                pad_multiple = 224
         collate = partial(wildfire_collate, pad_multiple=pad_multiple)
         kwargs = dict(batch_size=batch_size, shuffle=shuffle,
                       num_workers=self.num_workers, pin_memory=True,

@@ -144,6 +144,8 @@ class PrithviEO2Lightning(BaseModel):
         feature_fusion: Literal["concat", "sum", "mean", "last"] = "concat",
         backbone_lr_scale: float = 1.0,
         unfreeze_backbone_blocks: int = 0,
+        side_adapter_indices: Optional[list[int]] = None,
+        side_adapter_hidden_dim: int = 64,
         *args: Any,
         **kwargs: Any,
     ):
@@ -163,6 +165,8 @@ class PrithviEO2Lightning(BaseModel):
         self.feature_fusion = feature_fusion
         self.backbone_lr_scale = backbone_lr_scale
         self.unfreeze_backbone_blocks = max(0, int(unfreeze_backbone_blocks or 0))
+        self.side_adapter_indices = side_adapter_indices
+        self.side_adapter_hidden_dim = side_adapter_hidden_dim
         self._metadata_fallback_year = 2020.0
         self._metadata_days_per_year = 366.0
         try:
@@ -197,19 +201,57 @@ class PrithviEO2Lightning(BaseModel):
                 f"[PrithviEO2Lightning] Using automatically inferred backbone indices{depth_msg}: {self.backbone_indices}"
             )
         self.backbone_dim = int(getattr(self.backbone, "embed_dim", getattr(self.backbone, "hidden_size", 768)))
-        self.patch_size = getattr(self.backbone, "patch_size", 16)
-        if isinstance(self.patch_size, (tuple, list)):
-            self.patch_size = int(self.patch_size[0])
+        
+        # Detect patch size
+        self.patch_size = 16
+        model = getattr(self.backbone, "model", None)
+        patch_embed = getattr(self.backbone, "patch_embed", getattr(model, "patch_embed", None) if model else None)
+        
+        if patch_embed:
+            ps = getattr(patch_embed, "patch_size", getattr(getattr(patch_embed, "proj", None), "kernel_size", None))
+            if ps:
+                self.patch_size = int(ps[-1]) if isinstance(ps, (tuple, list)) else int(ps)
+        
+        rank_zero_info(f"[PrithviEO2Lightning] Detected patch size: {self.patch_size}")
+
         patch_embed = getattr(self.backbone, "patch_embed", None)
         proj = getattr(patch_embed, "proj", None) if patch_embed is not None else None
         self.backbone_in_channels = int(
             getattr(self.backbone, "in_channels", getattr(proj, "in_channels", n_channels))
         )
+
+        if self.side_adapter_indices is not None:
+            all_indices = set(range(n_channels))
+            side_set = set(self.side_adapter_indices)
+            backbone_set = all_indices - side_set
+            self.backbone_input_indices = sorted(list(backbone_set))
+            adapter_in_channels = len(self.backbone_input_indices)
+            
+            self.side_adapter_in = nn.Conv3d(
+                len(self.side_adapter_indices), 
+                side_adapter_hidden_dim, 
+                kernel_size=1
+            )
+            self.side_projector = TemporalProjector(
+                side_adapter_hidden_dim,
+                mode=temporal_pooling,
+                attention_heads=temporal_attention_heads
+            )
+            decoder_in_channels = self.backbone_dim
+            rank_zero_info(
+                f"[PrithviEO2Lightning] Using side adapter for {len(self.side_adapter_indices)} channels. "
+                f"Backbone sees {adapter_in_channels} channels."
+            )
+        else:
+            self.backbone_input_indices = None
+            adapter_in_channels = n_channels
+            decoder_in_channels = self.backbone_dim
+
         self.input_adapter = nn.Conv3d(
-            in_channels=n_channels,
+            in_channels=adapter_in_channels,
             out_channels=self.backbone_in_channels,
             kernel_size=(1, 1, 1),
-            bias=False,
+            bias=True,
         )
         self.temporal_projector = TemporalProjector(
             self.backbone_dim,
@@ -217,13 +259,21 @@ class PrithviEO2Lightning(BaseModel):
             attention_heads=temporal_attention_heads,
         )
         self.channel_adapter = nn.LazyConv2d(self.backbone_dim, kernel_size=1)
-        self.decoder = nn.Sequential(
+        
+        # Split decoder into backbone processing and final head
+        self.backbone_decoder = nn.Sequential(
             nn.Conv2d(self.backbone_dim, head_hidden_dim, kernel_size=3, padding=1),
             nn.GELU(),
             nn.Conv2d(head_hidden_dim, head_hidden_dim, kernel_size=3, padding=1),
             nn.GELU(),
-            nn.Conv2d(head_hidden_dim, 1, kernel_size=1),
         )
+        
+        final_in_channels = head_hidden_dim
+        if self.side_adapter_indices is not None:
+            final_in_channels += side_adapter_hidden_dim
+            
+        self.final_head = nn.Conv2d(final_in_channels, 1, kernel_size=1)
+        
         self._last_patch_hw = None
         self._curr_input_hw = None
 
@@ -250,6 +300,17 @@ class PrithviEO2Lightning(BaseModel):
 
         if self.unfreeze_backbone_blocks > 0:
             self._unfreeze_backbone_tail(self.unfreeze_backbone_blocks)
+
+        # Always unfreeze patch embedding to allow adaptation to new input domains/channels
+        patch_embed = getattr(self.backbone, "patch_embed", None)
+        if patch_embed is None:
+            model = getattr(self.backbone, "model", None)
+            patch_embed = getattr(model, "patch_embed", None)
+        
+        if patch_embed is not None:
+            for param in patch_embed.parameters():
+                param.requires_grad = True
+            rank_zero_info("[PrithviEO2Lightning] Unfroze backbone patch_embed.")
 
     def _resolve_backbone_blocks(self) -> Optional[nn.ModuleList]:
         blocks = getattr(self.backbone, "blocks", None)
@@ -378,10 +439,16 @@ class PrithviEO2Lightning(BaseModel):
             if isinstance(blocks, nn.ModuleList):
                 wrapped = []
                 for blk in blocks:
-                    if getattr(blk, "_is_checkpoint_wrapper", False):
-                        wrapped.append(blk)
+                    # OPTIMIZATION: Only checkpoint blocks that require gradients.
+                    # Checkpointing frozen blocks adds overhead without saving memory.
+                    requires_grad = any(p.requires_grad for p in blk.parameters())
+                    if requires_grad:
+                        if getattr(blk, "_is_checkpoint_wrapper", False):
+                            wrapped.append(blk)
+                        else:
+                            wrapped.append(_CheckpointWrapper(blk))
                     else:
-                        wrapped.append(_CheckpointWrapper(blk))
+                        wrapped.append(blk)
                 module.blocks = nn.ModuleList(wrapped)
                 applied = True
 
@@ -503,27 +570,11 @@ class PrithviEO2Lightning(BaseModel):
             coords = coords.expand(batch_size, -1, -1)
         coords = coords.to(device=device, dtype=dtype, non_blocking=True)
         coords = coords.contiguous()
-        coords = self._append_forecast_temporal_token(coords)
+        
+        if coords.shape[1] > self.num_frames:
+            coords = coords[:, :self.num_frames, :]
+            
         return coords
-
-    def _append_forecast_temporal_token(self, coords: torch.Tensor) -> torch.Tensor:
-        if coords.shape[1] == 0:
-            return coords
-        forecast = coords[:, -1:, :].clone()
-        forecast[..., 1] = forecast[..., 1] + 1.0
-        rollover = forecast[..., 1] >= self._metadata_days_per_year
-        if rollover.any():
-            forecast[..., 1] = torch.where(
-                rollover,
-                forecast[..., 1] - self._metadata_days_per_year,
-                forecast[..., 1],
-            )
-            forecast[..., 0] = torch.where(
-                rollover,
-                forecast[..., 0] + 1.0,
-                forecast[..., 0],
-            )
-        return torch.cat((coords, forecast), dim=1)
 
     def _prepare_location_coords(
         self,
@@ -670,6 +721,20 @@ class PrithviEO2Lightning(BaseModel):
         self._last_patch_hw = (padded_h // self.patch_size, padded_w // self.patch_size)
         # x is [B, T, C, H, W] coming from your datamodule
         x = x.permute(0, 2, 1, 3, 4).contiguous()   # -> [B, C, T, H, W]
+
+        side_feat = None
+        if self.side_adapter_indices is not None:
+            x_side = x[:, self.side_adapter_indices, ...]
+            x = x[:, self.backbone_input_indices, ...]
+            
+            # Process side features
+            # x_side: [B, C_side, T, H, W]
+            side_feat = self.side_adapter_in(x_side) # -> [B, C_hidden, T, H, W]
+            del x_side # OPTIMIZATION: Free memory
+            # Projector expects [B, T, C, H, W]
+            side_feat = side_feat.permute(0, 2, 1, 3, 4).contiguous()
+            side_feat = self.side_projector(side_feat) # -> [B, C_hidden, H, W]
+
         x = self.input_adapter(x)                   # Map dataset channels to backbone expectation
         self._curr_input_hw = tuple(int(d) for d in x.shape[-2:])
         batch_size = x.shape[0]
@@ -682,12 +747,40 @@ class PrithviEO2Lightning(BaseModel):
         backbone_output = self._forward_backbone(
             x, temporal_coords=backbone_temporal, location_coords=backbone_location
         )
+        
+        # OPTIMIZATION: Free inputs to backbone immediately
+        del x, backbone_temporal, backbone_location
+
         feature = self._extract_feature(backbone_output)
+        del backbone_output # OPTIMIZATION: Free the large backbone output structure
+        
         feature = self._select_spatial_feature(feature)
         if feature.shape[1] != self.backbone_dim:
             feature = self.channel_adapter(feature)
-        logits = self.decoder(feature)
-        logits = F.interpolate(logits, size=(padded_h, padded_w), mode="bilinear", align_corners=False)
+        
+        # Process backbone features
+        feature = self.backbone_decoder(feature)
+        
+        # Upsample backbone features to match input resolution (or side feature resolution)
+        feature = F.interpolate(feature, size=(padded_h, padded_w), mode="bilinear", align_corners=False)
+
+        if side_feat is not None:
+            # side_feat should already be (padded_h, padded_w)
+            if side_feat.shape[-2:] != feature.shape[-2:]:
+                 side_feat = F.interpolate(
+                    side_feat, 
+                    size=feature.shape[-2:], 
+                    mode="bilinear", 
+                    align_corners=False
+                )
+            feature = torch.cat([feature, side_feat], dim=1)
+            del side_feat # OPTIMIZATION: Free side features
+
+        logits = self.final_head(feature)
+        
+        # No need to interpolate logits again as feature is already upsampled
+        # logits = F.interpolate(logits, size=(padded_h, padded_w), mode="bilinear", align_corners=False)
+        
         if pad_h or pad_w:
             logits = logits[:, :, :orig_h, :orig_w]
         self._last_patch_hw = None

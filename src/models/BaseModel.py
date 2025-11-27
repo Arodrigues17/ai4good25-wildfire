@@ -54,7 +54,8 @@ class BaseModel(pl.LightningModule, ABC):
             )
 
         # Normalize class weights by assuming that the negative class has weight 1
-        if self.hparams.loss_function == "Focal" and self.hparams.pos_class_weight > 1:
+        # Changed > 1 to >= 1 to handle the default 1.0 case correctly (1.0 -> 0.5)
+        if self.hparams.loss_function == "Focal" and self.hparams.pos_class_weight >= 1:
             self.hparams.pos_class_weight /= 1 + self.hparams.pos_class_weight
 
         self.loss = self.get_loss()
@@ -365,7 +366,7 @@ class BaseModel(pl.LightningModule, ABC):
             return self.loss(
                 y_hat,
                 y.float(),
-                alpha=1 - self.hparams.pos_class_weight,
+                alpha=self.hparams.pos_class_weight,
                 gamma=2,
                 reduction="mean",
             )

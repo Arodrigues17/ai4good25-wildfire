@@ -1,0 +1,137 @@
+{
+    "_version": "v0",
+    "source_type": "repo",
+    "source": {
+        "git": {
+            "remote": "git@github.com:arodrigues17/ai4good25-wildfire.git",
+            "commit": "8f48c0bdcd4c661dae51020dce28baca45c42efa"
+        },
+        "entrypoint": [
+            "python",
+            "src/train.py"
+        ],
+        "notebook": false
+    },
+    "input_types": {
+        "wb_type": "typedDict",
+        "params": {
+            "type_map": {
+                "unique_tag": {
+                    "wb_type": "string"
+                },
+                "n_channels": {
+                    "wb_type": "number"
+                },
+                "flatten_temporal_dimension": {
+                    "wb_type": "boolean"
+                },
+                "pos_class_weight": {
+                    "wb_type": "number"
+                },
+                "loss_function": {
+                    "wb_type": "string"
+                },
+                "use_doy": {
+                    "wb_type": "boolean"
+                },
+                "required_img_size": {
+                    "wb_type": "none"
+                },
+                "freeze_backbone": {
+                    "wb_type": "boolean"
+                },
+                "temporal_pooling": {
+                    "wb_type": "string"
+                },
+                "temporal_attention_heads": {
+                    "wb_type": "number"
+                },
+                "head_hidden_dim": {
+                    "wb_type": "number"
+                },
+                "prithvi_variant": {
+                    "wb_type": "string"
+                },
+                "num_frames": {
+                    "wb_type": "number"
+                },
+                "backbone_indices": {
+                    "wb_type": "none"
+                },
+                "backbone_grad_checkpointing": {
+                    "wb_type": "boolean"
+                },
+                "feature_fusion": {
+                    "wb_type": "string"
+                },
+                "backbone_lr_scale": {
+                    "wb_type": "number"
+                },
+                "unfreeze_backbone_blocks": {
+                    "wb_type": "number"
+                },
+                "side_adapter_indices": {
+                    "wb_type": "list",
+                    "params": {
+                        "element_type": {
+                            "wb_type": "number"
+                        },
+                        "length": 33
+                    }
+                },
+                "side_adapter_hidden_dim": {
+                    "wb_type": "number"
+                }
+            }
+        }
+    },
+    "output_types": {
+        "wb_type": "typedDict",
+        "params": {
+            "type_map": {
+                "val_loss": {
+                    "wb_type": "typedDict",
+                    "params": {
+                        "type_map": {
+                            "min": {
+                                "wb_type": "number"
+                            }
+                        }
+                    }
+                },
+                "val_f1": {
+                    "wb_type": "typedDict",
+                    "params": {
+                        "type_map": {
+                            "max": {
+                                "wb_type": "number"
+                            }
+                        }
+                    }
+                },
+                "epoch": {
+                    "wb_type": "number"
+                },
+                "trainer/global_step": {
+                    "wb_type": "number"
+                },
+                "_timestamp": {
+                    "wb_type": "number"
+                },
+                "_runtime": {
+                    "wb_type": "number"
+                },
+                "_step": {
+                    "wb_type": "number"
+                },
+                "train_loss": {
+                    "wb_type": "number"
+                },
+                "train_f1": {
+                    "wb_type": "number"
+                }
+            }
+        }
+    },
+    "runtime": "3.10.14"
+}

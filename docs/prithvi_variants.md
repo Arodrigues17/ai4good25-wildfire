@@ -21,6 +21,8 @@ This guide summarizes how the Prithvi-EO-2.0 transformers that ship with TerraTo
 
 * **100 M TL** – `batch_size: 4`, `accumulate_grad_batches: 1`, `freeze_backbone: false`, `unfreeze_backbone_blocks: 0`. Full finetuning is typically stable on 16 GB GPUs.
 * **300 M TL (high-capacity)** – `batch_size: 2`, `accumulate_grad_batches: 2`, `freeze_backbone: false`, `temporal_pooling: attn`, `feature_fusion: concat`, `head_hidden_dim: 512`. Requires ≥32 GB GPUs; toggle `feature_fusion: last` or re-enable backbone freezing when adapting to smaller cards.
+* **300 M TL (balanced)** – `batch_size: 4`, `freeze_backbone: true` with `unfreeze_backbone_blocks: 6`, `temporal_pooling: attn`, `feature_fusion: last`, `head_hidden_dim: 320`, `backbone_lr_scale: 0.5`. Keeps VRAM near ~85 % while letting gradients flow through the decoder and last backbone stages.
+* **300 M TL (memory-capped)** – `batch_size: 1–2`, `freeze_backbone: true`, `temporal_pooling: conv`, `feature_fusion: last`, `head_hidden_dim: 256`, `backbone_lr_scale: 0.25`. Pair with gradient checkpointing and AMP to stay below ~32 GB while keeping the Prithvi-300 encoder intact.
 * **600 M TL** – `batch_size: 1`, `accumulate_grad_batches: 4`, `freeze_backbone: true`, `unfreeze_backbone_blocks: 4`. Combine with BF16 mixed precision to stay below 44 GB.
 
 ## Launch examples

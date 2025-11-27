@@ -37,8 +37,10 @@ class MyTestMetrics(Metric):
         self.target.append(target.detach().flatten().cpu())
 
     def compute(self):
-        targets = torch.cat(self.target).numpy()
-        preds = torch.cat(self.preds).numpy()
+        # targets = torch.cat(self.target).numpy()
+        # preds = torch.cat(self.preds).numpy()
+        targets = torch.cat(self.target).float().numpy()
+        preds = torch.cat(self.preds).float().numpy()
         return compute_metrics_and_plots(preds, targets)
     
 def compute_metrics_and_plots(preds, targets):

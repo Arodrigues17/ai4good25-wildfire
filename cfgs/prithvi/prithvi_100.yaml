@@ -1,0 +1,22 @@
+model:
+  class_path: models.PrithviEO2Model.PrithviEO2Lightning
+  init_args:
+    n_channels: 0            # overwritten via LightningCLI
+    flatten_temporal_dimension: false
+    pos_class_weight: 1.0
+    loss_function: Focal
+    freeze_backbone: false
+    temporal_pooling: conv
+    head_hidden_dim: 192
+    prithvi_variant: "prithvi_eo_tiny"
+    num_frames: 5
+    backbone_grad_checkpointing: true
+    feature_fusion: last
+    backbone_lr_scale: 0.25
+    unfreeze_backbone_blocks: 4
+    side_adapter_indices: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+    side_adapter_hidden_dim: 64
+
+do_train: true
+do_test: true
+do_predict: false

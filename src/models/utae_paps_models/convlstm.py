@@ -63,13 +63,14 @@ class ConvLSTMCell(nn.Module):
 
         return h_next, c_next
 
-    def init_hidden(self, batch_size, device):
+    def init_hidden(self, batch_size, device, spatial_size=None):
+        height, width = spatial_size if spatial_size is not None else (self.height, self.width)
         return (
             Variable(
-                torch.zeros(batch_size, self.hidden_dim, self.height, self.width)
+                torch.zeros(batch_size, self.hidden_dim, height, width)
             ).to(device),
             Variable(
-                torch.zeros(batch_size, self.hidden_dim, self.height, self.width)
+                torch.zeros(batch_size, self.hidden_dim, height, width)
             ).to(device),
         )
 
@@ -138,14 +139,16 @@ class ConvLSTM(nn.Module):
         """
         if not self.batch_first:
             # (t, b, c, h, w) -> (b, t, c, h, w)
-            input_tensor.permute(1, 0, 2, 3, 4)
+            input_tensor = input_tensor.permute(1, 0, 2, 3, 4)
 
         # Implement stateful ConvLSTM
         if hidden_state is not None:
             raise NotImplementedError()
         else:
             hidden_state = self._init_hidden(
-                batch_size=input_tensor.size(0), device=input_tensor.device
+                batch_size=input_tensor.size(0),
+                device=input_tensor.device,
+                spatial_size=(input_tensor.size(3), input_tensor.size(4)),
             )
 
         layer_output_list = []
@@ -180,10 +183,12 @@ class ConvLSTM(nn.Module):
 
         return layer_output_list, last_state_list
 
-    def _init_hidden(self, batch_size, device):
+    def _init_hidden(self, batch_size, device, spatial_size=None):
         init_states = []
         for i in range(self.num_layers):
-            init_states.append(self.cell_list[i].init_hidden(batch_size, device))
+            init_states.append(
+                self.cell_list[i].init_hidden(batch_size, device, spatial_size=spatial_size)
+            )
         return init_states
 
     @staticmethod

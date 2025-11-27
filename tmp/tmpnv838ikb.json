@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "storagePolicy": "wandb-storage-policy-v1",
+    "storagePolicyConfig": {
+        "storageLayout": "V2"
+    },
+    "contents": {
+        "Test confusion matrix.table.json": {
+            "digest": "EriZMqIetZevci9pPb19bw==",
+            "birthArtifactID": "QXJ0aWZhY3Q6MjI3MDkwNzQxNg==",
+            "size": 447
+        }
+    }
+}

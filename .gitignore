@@ -1,6 +1,12 @@
 .vscode/
 lightning_logs/
+tmp/
+
+# Weights and Biases
+.wandb/
+.wandb_cache/
 wandb/
+
 # Byte-compiled / optimized / DLL files
 todo.txt
 __pycache__/
