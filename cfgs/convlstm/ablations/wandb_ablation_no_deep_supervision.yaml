@@ -25,8 +25,8 @@ metric:
 parameters:
   data.data_fold_id:
     values:
-      - 0
-      - 5
+      - 4
+      - 6
       - 10
   do_test:
     value: True
