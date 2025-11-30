@@ -110,6 +110,7 @@ class TransformerCA(BaseModel):
         nhead: int = 4, 
         num_layers: int = 4, 
         kernel_size: int = 3,
+        dropout: float = 0.1,
         use_doy: bool = False,
         n_leading_observations: int = 1,
         **kwargs
@@ -152,7 +153,7 @@ class TransformerCA(BaseModel):
             nhead=nhead,
             num_layers=num_layers,
             kernel_size=kernel_size,
-            dropout=kwargs.get('dropout', 0.1)
+            dropout=dropout
         )
 
     def forward(self, x, doys=None):
