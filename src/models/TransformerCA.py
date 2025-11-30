@@ -5,7 +5,7 @@ from .BaseModel import BaseModel
 
 class TransformerCAModule(nn.Module):
     def __init__(self, in_channels: int, d_model: int = 128, nhead: int = 4, num_layers: int = 2, 
-                 kernel_size: int = 3):
+                 kernel_size: int = 3, dropout: float = 0.1):
         super().__init__()
         self.kernel_size = kernel_size
         self.padding = kernel_size // 2
@@ -24,13 +24,24 @@ class TransformerCAModule(nn.Module):
             dim_feedforward=d_model*2, 
             activation='gelu', 
             batch_first=True,
-            norm_first=True
+            norm_first=True,
+            dropout=dropout
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
+        self.norm_final = nn.LayerNorm(d_model)
+
         # Output projection to binary mask logits
         # We use the center token's representation to predict the next state
         self.output_head = nn.Linear(d_model, 1)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.pos_embed, std=0.02)
+        nn.init.xavier_uniform_(self.embedding.weight)
+        nn.init.xavier_uniform_(self.output_head.weight)
+        nn.init.constant_(self.output_head.bias, 0)
 
     def forward(self, x):
         # Handle input shape: (B, T, C, H, W) -> (B, T*C, H, W) if necessary
@@ -67,7 +78,7 @@ class TransformerCAModule(nn.Module):
         # With B*H*W ~ 260k, it might be hitting limits.
         
         # Let's try to process in chunks to avoid this.
-        chunk_size = 4096 # Increased chunk size since we reduced d_model
+        chunk_size = 1024 # Increased chunk size since we reduced d_model
         outputs = []
         for i in range(0, x.shape[0], chunk_size):
             chunk = x[i:i+chunk_size]
@@ -79,6 +90,8 @@ class TransformerCAModule(nn.Module):
         center_idx = (self.kernel_size * self.kernel_size) // 2
         x_center = x[:, center_idx, :] # (B*HW, d_model)
         
+        x_center = self.norm_final(x_center)
+
         # Output head
         logits = self.output_head(x_center) # (B*HW, 1)
         
@@ -138,7 +151,8 @@ class TransformerCA(BaseModel):
             d_model=d_model,
             nhead=nhead,
             num_layers=num_layers,
-            kernel_size=kernel_size
+            kernel_size=kernel_size,
+            dropout=kwargs.get('dropout', 0.1)
         )
 
     def forward(self, x, doys=None):

@@ -24,7 +24,7 @@ class BaseModel(pl.LightningModule, ABC):
         n_channels: int,
         flatten_temporal_dimension: bool,
         pos_class_weight: float,
-        loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice"],
+        loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice", "FocalDice"],
         use_doy: bool = False,
         required_img_size: Optional[Tuple[int, int]] = None,
         *args: Any,
@@ -53,7 +53,7 @@ class BaseModel(pl.LightningModule, ABC):
             )
 
         # Normalize class weights by assuming that the negative class has weight 1
-        if self.hparams.loss_function == "Focal" and self.hparams.pos_class_weight > 1:
+        if (self.hparams.loss_function == "Focal" or self.hparams.loss_function == "FocalDice") and self.hparams.pos_class_weight > 1:
             self.hparams.pos_class_weight /= 1 + self.hparams.pos_class_weight
 
         self.loss = self.get_loss()
@@ -278,6 +278,8 @@ class BaseModel(pl.LightningModule, ABC):
             return JaccardLoss(mode="binary")
         elif self.hparams.loss_function == "Dice":
             return DiceLoss(mode="binary")
+        elif self.hparams.loss_function == "FocalDice":
+            return (sigmoid_focal_loss, DiceLoss(mode="binary"))
 
     def compute_loss(self, y_hat, y):
         if self.hparams.loss_function == "Focal":
@@ -288,6 +290,17 @@ class BaseModel(pl.LightningModule, ABC):
                 gamma=2,
                 reduction="mean",
             )
+        elif self.hparams.loss_function == "FocalDice":
+            focal, dice = self.loss
+            loss_focal = focal(
+                y_hat,
+                y.float(),
+                alpha=1 - self.hparams.pos_class_weight,
+                gamma=2,
+                reduction="mean",
+            )
+            loss_dice = dice(y_hat, y.float())
+            return loss_focal + loss_dice
         else:
             return self.loss(y_hat, y.float())
 
