@@ -27,6 +27,7 @@ class BaseModel(pl.LightningModule, ABC):
         loss_function: Literal["BCE", "Focal", "Lovasz", "Jaccard", "Dice", "FocalDice"],
         use_doy: bool = False,
         required_img_size: Optional[Tuple[int, int]] = None,
+        physics_loss_weight: float = 0.0,
         *args: Any,
         **kwargs: Any
     ):
@@ -140,11 +141,11 @@ class BaseModel(pl.LightningModule, ABC):
                         agg_output[:, H1:H2, W1:W2] = self(x_crop, doys).squeeze(1)
 
                 y_hat = agg_output
-                return y_hat, y
+                return y_hat, y, x
 
         y_hat = self(x, doys).squeeze(1)
 
-        return y_hat, y
+        return y_hat, y, x
 
     def training_step(self, batch, batch_idx):
         """_summary_ Compute predictions and loss for the given batch. Log training loss and F1 score.
@@ -156,9 +157,9 @@ class BaseModel(pl.LightningModule, ABC):
         Returns:
             _type_: _description_
         """
-        y_hat, y = self.get_pred_and_gt(batch)
+        y_hat, y, x = self.get_pred_and_gt(batch)
 
-        loss = self.compute_loss(y_hat, y)
+        loss = self.compute_loss(y_hat, y, x)
         f1 = self.train_f1(y_hat.detach(), y.detach())
         self.log(
             "train_loss",
@@ -189,9 +190,9 @@ class BaseModel(pl.LightningModule, ABC):
         Returns:
             _type_: _description_
         """
-        y_hat, y = self.get_pred_and_gt(batch)
+        y_hat, y, x = self.get_pred_and_gt(batch)
 
-        loss = self.compute_loss(y_hat, y)
+        loss = self.compute_loss(y_hat, y, x)
         f1 = self.val_f1(y_hat.detach(), y.detach())
         self.log(
             "val_loss",
@@ -222,11 +223,11 @@ class BaseModel(pl.LightningModule, ABC):
         Returns:
             _type_: _description_
         """
-        y_hat, y = self.get_pred_and_gt(batch)
+        y_hat, y, x = self.get_pred_and_gt(batch)
         y_hat = y_hat.detach()
         y = y.detach()      
 
-        loss = self.compute_loss(y_hat, y)
+        loss = self.compute_loss(y_hat, y, x)
         self.test_f1(y_hat, y)
         self.test_metrics.update(y_hat, y)
         self.conf_mat.update(y_hat, y)
@@ -281,9 +282,9 @@ class BaseModel(pl.LightningModule, ABC):
         elif self.hparams.loss_function == "FocalDice":
             return (sigmoid_focal_loss, DiceLoss(mode="binary"))
 
-    def compute_loss(self, y_hat, y):
+    def compute_loss(self, y_hat, y, x=None):
         if self.hparams.loss_function == "Focal":
-            return self.loss(
+            loss = self.loss(
                 y_hat,
                 y.float(),
                 alpha=1 - self.hparams.pos_class_weight,
@@ -300,7 +301,40 @@ class BaseModel(pl.LightningModule, ABC):
                 reduction="mean",
             )
             loss_dice = dice(y_hat, y.float())
-            return loss_focal + loss_dice
+            loss = loss_focal + loss_dice
         else:
-            return self.loss(y_hat, y.float())
+            loss = self.loss(y_hat, y.float())
+        
+        # Physics-Informed Loss (Spread Zone Constraint)
+        if self.hparams.physics_loss_weight > 0 and x is not None:
+            # Assume the last channel of the last time step is the active fire mask
+            # x shape: (B, T, C, H, W)
+            if x.ndim == 5:
+                prev_fire = x[:, -1, -1, :, :]
+                
+                # Dilate to create "plausible spread zone"
+                # Use 3x3 kernel for dilation
+                kernel_size = 3
+                padding = kernel_size // 2
+                prev_fire_unsqueezed = prev_fire.unsqueeze(1) # (B, 1, H, W)
+                
+                # MaxPool2d acts as morphological dilation for binary masks
+                dilated = torch.nn.functional.max_pool2d(
+                    prev_fire_unsqueezed, 
+                    kernel_size=kernel_size, 
+                    stride=1, 
+                    padding=padding
+                )
+                dilated = dilated.squeeze(1) # (B, H, W)
+                
+                # Calculate penalty: predicted fire probability outside the dilated zone
+                probs = torch.sigmoid(y_hat)
+                
+                # (1 - dilated) is 1 where fire is impossible (outside spread zone)
+                # We penalize high probability in these regions
+                penalty = (probs * (1 - dilated)).mean()
+                
+                loss += self.hparams.physics_loss_weight * penalty
+                
+        return loss
 
