@@ -16,6 +16,7 @@ model:
     nhead: 4
     num_layers: 3
     kernel_size: 3
+    dilations: [1, 2, 4, 8]
     dropout: 0.3
     use_doy: false
     physics_loss_weight: 1.0

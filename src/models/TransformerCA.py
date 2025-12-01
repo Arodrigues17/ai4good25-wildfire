@@ -5,45 +5,51 @@ from .BaseModel import BaseModel
 
 class TransformerCAModule(nn.Module):
     def __init__(self, in_channels: int, d_model: int = 128, nhead: int = 4, num_layers: int = 2, 
-                 kernel_size: int = 3, dropout: float = 0.1):
+                 kernel_size: int = 3, dilations: list[int] = [1], dropout: float = 0.1):
         super().__init__()
         self.kernel_size = kernel_size
-        self.padding = kernel_size // 2
+        self.dilations = dilations
+        # Padding is calculated per dilation in forward
         
         # Input projection: Maps input features to d_model
         # We use Conv2d with kernel_size=1 to project before unfolding
         self.embedding = nn.Conv2d(in_channels, d_model, kernel_size=1)
         
         # Learnable positional encoding for the local window
-        self.pos_embed = nn.Parameter(torch.zeros(1, kernel_size*kernel_size, d_model))
+        self.num_tokens = len(dilations) * kernel_size * kernel_size
+        self.pos_embed = nn.Parameter(torch.zeros(1, self.num_tokens, d_model))
         
         # Transformer Encoder
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, 
-            nhead=nhead, 
-            dim_feedforward=d_model*2, 
-            activation='gelu', 
-            batch_first=True,
-            norm_first=True,
-            dropout=dropout
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        # Use ModuleList for Deep Supervision
+        self.layers = nn.ModuleList([
+            nn.TransformerEncoderLayer(
+                d_model=d_model, 
+                nhead=nhead, 
+                dim_feedforward=d_model*2, 
+                activation='gelu', 
+                batch_first=True,
+                norm_first=True,
+                dropout=dropout
+            ) for _ in range(num_layers)
+        ])
         
         self.norm_final = nn.LayerNorm(d_model)
 
-        # Output projection to binary mask logits
-        # We use the center token's representation to predict the next state
-        self.output_head = nn.Linear(d_model, 1)
+        # Output heads for each layer (Deep Supervision)
+        self.output_heads = nn.ModuleList([
+            nn.Linear(d_model, 1) for _ in range(num_layers)
+        ])
 
         self._init_weights()
 
     def _init_weights(self):
         nn.init.normal_(self.pos_embed, std=0.02)
         nn.init.xavier_uniform_(self.embedding.weight)
-        nn.init.xavier_uniform_(self.output_head.weight)
-        nn.init.constant_(self.output_head.bias, 0)
+        for head in self.output_heads:
+            nn.init.xavier_uniform_(head.weight)
+            nn.init.constant_(head.bias, 0)
 
-    def forward(self, x):
+    def forward(self, x, input_mask=None):
         # Handle input shape: (B, T, C, H, W) -> (B, T*C, H, W) if necessary
         if x.ndim == 5:
             B, T, C, H, W = x.shape
@@ -54,51 +60,66 @@ class TransformerCAModule(nn.Module):
         # Project to d_model first (B, d_model, H, W)
         x = self.embedding(x)
         
-        # Extract local patches
-        # unfold: (B, d_model, H, W) -> (B, d_model*K*K, L), where L=H*W
-        patches = torch.nn.functional.unfold(x, kernel_size=self.kernel_size, padding=self.padding)
-        
-        # Reshape to (B*L, K*K, d_model)
-        # 1. Transpose to (B, L, d_model*K*K)
-        patches = patches.transpose(1, 2)
-        # 2. View as (B, L, d_model, K*K)
-        patches = patches.view(B, H*W, -1, self.kernel_size*self.kernel_size)
-        # 3. Permute to (B, L, K*K, d_model)
-        patches = patches.permute(0, 1, 3, 2)
-        # 4. Flatten batch and spatial: (B*H*W, K*K, d_model)
-        x = patches.reshape(-1, self.kernel_size*self.kernel_size, x.shape[1])
+        all_patches = []
+        for dilation in self.dilations:
+            padding = (self.kernel_size - 1) * dilation // 2
+            # Extract local patches
+            # unfold: (B, d_model, H, W) -> (B, d_model*K*K, L), where L=H*W
+            patches = torch.nn.functional.unfold(x, kernel_size=self.kernel_size, padding=padding, dilation=dilation)
+            
+            # Reshape to (B*L, K*K, d_model)
+            # 1. Transpose to (B, L, d_model*K*K)
+            patches = patches.transpose(1, 2)
+            # 2. View as (B, L, d_model, K*K)
+            patches = patches.view(B, H*W, -1, self.kernel_size*self.kernel_size)
+            # 3. Permute to (B, L, K*K, d_model)
+            patches = patches.permute(0, 1, 3, 2)
+            # 4. Flatten batch and spatial: (B*H*W, K*K, d_model)
+            patches = patches.reshape(-1, self.kernel_size*self.kernel_size, x.shape[1])
+            all_patches.append(patches)
+            
+        x = torch.cat(all_patches, dim=1)
         
         # Add positional encoding
         x = x + self.pos_embed
         
         # Transformer
         # Processing such a large batch size (B*H*W) in one go might be problematic.
-        # Let's process in chunks if necessary, but first let's try to see if it works.
-        # The error "CUDA error: invalid configuration argument" often happens when grid dimensions are too large.
-        # With B*H*W ~ 260k, it might be hitting limits.
+        # Let's process in chunks if necessary.
         
-        # Let's try to process in chunks to avoid this.
-        chunk_size = 1024 # Increased chunk size since we reduced d_model
-        outputs = []
+        chunk_size = 1024 
+        all_layer_logits = [[] for _ in range(len(self.layers))]
+
         for i in range(0, x.shape[0], chunk_size):
             chunk = x[i:i+chunk_size]
-            out_chunk = self.transformer(chunk)
-            outputs.append(out_chunk)
-        x = torch.cat(outputs, dim=0)
-        
-        # Take center token
-        center_idx = (self.kernel_size * self.kernel_size) // 2
-        x_center = x[:, center_idx, :] # (B*HW, d_model)
-        
-        x_center = self.norm_final(x_center)
+            
+            for layer_idx, layer in enumerate(self.layers):
+                chunk = layer(chunk)
+                
+                # Compute logits for this layer
+                # Take center token
+                center_idx = (self.kernel_size * self.kernel_size) // 2
+                chunk_center = chunk[:, center_idx, :] 
+                
+                # Apply norm before head
+                chunk_center = self.norm_final(chunk_center)
 
-        # Output head
-        logits = self.output_head(x_center) # (B*HW, 1)
+                # Output head
+                logits = self.output_heads[layer_idx](chunk_center) # (Chunk, 1)
+                all_layer_logits[layer_idx].append(logits)
         
-        # Reshape back to image
-        logits = logits.view(B, H, W, 1).permute(0, 3, 1, 2) # (B, 1, H, W)
+        final_outputs = []
+        for layer_logits in all_layer_logits:
+            l = torch.cat(layer_logits, dim=0)
+            l = l.view(B, H, W, 1).permute(0, 3, 1, 2) # (B, 1, H, W)
+            
+            # Residual Connection
+            if input_mask is not None:
+                l = l + input_mask.unsqueeze(1)
+                
+            final_outputs.append(l)
         
-        return logits
+        return final_outputs
 
 class TransformerCA(BaseModel):
     def __init__(
@@ -110,6 +131,7 @@ class TransformerCA(BaseModel):
         nhead: int = 4, 
         num_layers: int = 4, 
         kernel_size: int = 3,
+        dilations: list[int] = [1],
         dropout: float = 0.1,
         use_doy: bool = False,
         n_leading_observations: int = 1,
@@ -153,10 +175,18 @@ class TransformerCA(BaseModel):
             nhead=nhead,
             num_layers=num_layers,
             kernel_size=kernel_size,
+            dilations=dilations,
             dropout=dropout
         )
 
     def forward(self, x, doys=None):
+        # Extract input mask for residual connection
+        # x: (B, T, C, H, W)
+        input_mask = None
+        if x.ndim == 5:
+            # Last channel of last timestep
+            input_mask = x[:, -1, -1, :, :] # (B, H, W)
+
         if self.hparams.use_doy and doys is not None:
             # x: (B, T, C, H, W)
             # doys: (B, T)
@@ -177,4 +207,47 @@ class TransformerCA(BaseModel):
         elif self.hparams.flatten_temporal_dimension and x.ndim == 5:
              x = x.flatten(1, 2)
              
-        return self.model(x)
+        outputs = self.model(x, input_mask=input_mask)
+        
+        if self.training:
+            return outputs # List of tensors
+        else:
+            return outputs[-1] # Final tensor
+
+    def training_step(self, batch, batch_idx):
+        y_hat, y, x = self.get_pred_and_gt(batch)
+        
+        if isinstance(y_hat, list):
+            total_loss = 0
+            for pred in y_hat:
+                total_loss += self.compute_loss(pred, y, x)
+            
+            # Log final layer metrics
+            final_pred = y_hat[-1]
+            final_loss = self.compute_loss(final_pred, y, x)
+            
+            self.log("train_loss", final_loss.detach().item(), on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log("train_loss_total", total_loss.detach().item(), on_step=False, on_epoch=True, logger=True, sync_dist=True)
+            
+            f1 = self.train_f1(final_pred.detach(), y.detach())
+            self.log("train_f1", self.train_f1, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+            
+            return total_loss
+        else:
+            return super().training_step(batch, batch_idx)
+    
+    def get_pred_and_gt(self, batch):
+        if len(batch) == 3:
+            x, y, doys = batch
+        else:
+            x, y = batch
+            doys = None
+            
+        y_hat = self(x, doys)
+        
+        if isinstance(y_hat, list):
+            y_hat = [pred.squeeze(1) for pred in y_hat]
+        else:
+            y_hat = y_hat.squeeze(1)
+            
+        return y_hat, y, x
