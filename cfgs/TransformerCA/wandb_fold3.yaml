@@ -18,18 +18,18 @@ parameters:
     value: True
   data.data_fold_id:
     values:
-      - 0
-      - 1
+      # - 0
+      # - 1
       - 2
       # - 3
       # - 4
       # - 5
-      # - 6
+      - 6
       # - 7
       # - 8
       # - 9
       # - 10
-      # - 11
+      - 11
   data.features_to_keep:
     values:
       # - [0, 1, 2, 3, 4, 38, 39] # Vegetation + Active Fire
@@ -37,8 +37,6 @@ parameters:
       - None # All features
   data.n_leading_observations:
     value: 5
-  data.batch_size:
-    value: 32
   trainer.max_steps: 
     value: 10000
   do_test:
