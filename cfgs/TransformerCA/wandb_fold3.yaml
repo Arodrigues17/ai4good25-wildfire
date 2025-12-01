@@ -7,7 +7,7 @@ command:
   - --trainer
   - cfgs/trainer_single_gpu.yaml
   - --data
-  - cfgs/data_monotemporal_full_features_doys.yaml
+  - cfgs/data_multitemporal_full_features_doys.yaml
   - ${args}
 method: grid
 metric:
