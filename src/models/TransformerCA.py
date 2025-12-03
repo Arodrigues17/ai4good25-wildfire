@@ -3,12 +3,56 @@ import torch.nn as nn
 from typing import Any, Optional
 from .BaseModel import BaseModel
 
+class TemporalAttention(nn.Module):
+    def __init__(self, in_channels, d_model=64):
+        super().__init__()
+        self.d_model = d_model
+        self.query = nn.Conv2d(in_channels, d_model, 1)
+        self.key = nn.Conv2d(in_channels, d_model, 1)
+        self.value = nn.Conv2d(in_channels, in_channels, 1)
+        
+    def forward(self, x):
+        # x: (B, T, C, H, W)
+        B, T, C, H, W = x.shape
+        
+        # Reshape to (B*T, C, H, W)
+        x_flat = x.view(B*T, C, H, W)
+        
+        # Compute Q, K, V per pixel
+        Q = self.query(x_flat).view(B, T, self.d_model, H, W)
+        K = self.key(x_flat).view(B, T, self.d_model, H, W)
+        V = self.value(x_flat).view(B, T, C, H, W)
+        
+        # Attention scores: (B, H, W, T, T)
+        # Q: (B, T, d, H, W) -> permute -> (B, H, W, T, d)
+        Q = Q.permute(0, 3, 4, 1, 2)
+        K = K.permute(0, 3, 4, 1, 2)
+        V = V.permute(0, 3, 4, 1, 2)
+        
+        # (B, H, W, T, d) @ (B, H, W, d, T) -> (B, H, W, T, T)
+        scores = torch.matmul(Q, K.transpose(-1, -2)) / (self.d_model ** 0.5)
+        attn = torch.softmax(scores, dim=-1)
+        
+        # (B, H, W, T, T) @ (B, H, W, T, C) -> (B, H, W, T, C)
+        out = torch.matmul(attn, V)
+        
+        # Permute back to (B, T, C, H, W)
+        out = out.permute(0, 3, 4, 1, 2)
+        
+        return out
+
 class TransformerCAModule(nn.Module):
     def __init__(self, in_channels: int, d_model: int = 128, nhead: int = 4, num_layers: int = 2, 
-                 kernel_size: int = 3, dilations: list[int] = [1], dropout: float = 0.1):
+                 kernel_size: int = 3, dilations: list[int] = [1], dropout: float = 0.1,
+                 use_temporal_attention: bool = False, n_time_steps: int = 1, input_channels_per_step: int = 1):
         super().__init__()
         self.kernel_size = kernel_size
         self.dilations = dilations
+        self.use_temporal_attention = use_temporal_attention
+        
+        if use_temporal_attention:
+            self.temporal_attn = TemporalAttention(input_channels_per_step, d_model=d_model//2)
+
         # Padding is calculated per dilation in forward
         
         # Input projection: Maps input features to d_model
@@ -51,6 +95,10 @@ class TransformerCAModule(nn.Module):
 
     def forward(self, x, input_mask=None):
         # Handle input shape: (B, T, C, H, W) -> (B, T*C, H, W) if necessary
+        if self.use_temporal_attention and x.ndim == 5:
+            # Apply Temporal Attention
+            x = self.temporal_attn(x)
+            
         if x.ndim == 5:
             B, T, C, H, W = x.shape
             x = x.view(B, T*C, H, W)
@@ -135,6 +183,7 @@ class TransformerCA(BaseModel):
         dropout: float = 0.1,
         use_doy: bool = False,
         n_leading_observations: int = 1,
+        use_temporal_attention: bool = False,
         **kwargs
     ):
         """
@@ -163,11 +212,23 @@ class TransformerCA(BaseModel):
         
         # Calculate actual input channels if DOY is used
         model_in_channels = n_channels
+        input_channels_per_step = n_channels
+        
         if use_doy:
             if flatten_temporal_dimension:
                 model_in_channels = n_channels + n_leading_observations
+                # If flattened, n_channels is T*C. 
+                # We assume n_channels passed here is T*C if flatten_temporal_dimension is True.
+                # So C = n_channels / T
+                input_channels_per_step = (n_channels // n_leading_observations) + 1
             else:
                 model_in_channels = n_channels + 1
+                input_channels_per_step = n_channels + 1
+        else:
+            if flatten_temporal_dimension:
+                input_channels_per_step = n_channels // n_leading_observations
+            else:
+                input_channels_per_step = n_channels
 
         self.model = TransformerCAModule(
             in_channels=model_in_channels,
@@ -176,7 +237,10 @@ class TransformerCA(BaseModel):
             num_layers=num_layers,
             kernel_size=kernel_size,
             dilations=dilations,
-            dropout=dropout
+            dropout=dropout,
+            use_temporal_attention=use_temporal_attention,
+            n_time_steps=n_leading_observations,
+            input_channels_per_step=input_channels_per_step
         )
 
     def forward(self, x, doys=None):
@@ -201,11 +265,12 @@ class TransformerCA(BaseModel):
                 x = torch.cat([x, doys_map], dim=2) # (B, T, C+1, H, W)
             
             # Flatten if needed
-            if self.hparams.flatten_temporal_dimension:
+            if self.hparams.flatten_temporal_dimension and not self.hparams.use_temporal_attention:
                 x = x.flatten(1, 2) # (B, T*(C+1), H, W)
                 
         elif self.hparams.flatten_temporal_dimension and x.ndim == 5:
-             x = x.flatten(1, 2)
+             if not self.hparams.use_temporal_attention:
+                 x = x.flatten(1, 2)
              
         outputs = self.model(x, input_mask=input_mask)
         

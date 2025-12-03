@@ -20,6 +20,7 @@ model:
     dropout: 0.3
     use_doy: false
     physics_loss_weight: 1.0
+    use_temporal_attention: true
     # n_leading_observations is injected by train.py
   
 do_train: true
