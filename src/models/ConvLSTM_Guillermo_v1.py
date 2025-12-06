@@ -63,6 +63,7 @@ class EnhancedConvLSTMCell(nn.Module):
         bias=True,
         use_attention=True,
         use_residual=True,
+        use_groupnorm=True,
     ):
         super(EnhancedConvLSTMCell, self).__init__()
 
@@ -71,6 +72,7 @@ class EnhancedConvLSTMCell(nn.Module):
         self.hidden_dim = hidden_dim
         self.use_attention = use_attention
         self.use_residual = use_residual
+        self.use_groupnorm = use_groupnorm
 
         self.kernel_size = kernel_size
         self.padding = kernel_size[0] // 2, kernel_size[1] // 2
@@ -95,8 +97,9 @@ class EnhancedConvLSTMCell(nn.Module):
         elif self.use_residual:
             self.residual_proj = None
 
-        # Layer normalization for stability
-        self.layer_norm = nn.GroupNorm(8, hidden_dim)
+        # Layer normalization for stability (optional for ablation)
+        if self.use_groupnorm:
+            self.layer_norm = nn.GroupNorm(min(8, hidden_dim), hidden_dim)
 
     def forward(self, input_tensor, cur_state):
         h_cur, c_cur = cur_state
@@ -113,8 +116,9 @@ class EnhancedConvLSTMCell(nn.Module):
         c_next = f * c_cur + i * g
         h_next = o * torch.tanh(c_next)
 
-        # Apply layer normalization
-        h_next = self.layer_norm(h_next)
+        # Apply layer normalization (optional)
+        if self.use_groupnorm:
+            h_next = self.layer_norm(h_next)
 
         # Apply attention
         if self.use_attention:
@@ -156,6 +160,7 @@ class MultiScaleConvLSTM(nn.Module):
         return_all_layers=False,
         use_attention=True,
         use_residual=True,
+        use_groupnorm=True,
         pyramid_scales=[1, 2, 4],
     ):
         super(MultiScaleConvLSTM, self).__init__()
@@ -211,6 +216,7 @@ class MultiScaleConvLSTM(nn.Module):
                     bias=bias,
                     use_attention=use_attention,
                     use_residual=use_residual,
+                    use_groupnorm=use_groupnorm,
                 )
             )
 
@@ -290,6 +296,9 @@ class ConvLSTM_Guillermo_v1_Seg(nn.Module):
         pyramid_scales=[1, 2, 4],
         use_attention=True,
         use_residual=True,
+        use_groupnorm=True,
+        use_feature_refinement=True,
+        use_multiscale_head=True,
         dropout_rate=0.1,
         pad_value=0,
     ):
@@ -297,6 +306,8 @@ class ConvLSTM_Guillermo_v1_Seg(nn.Module):
 
         self.pad_value = pad_value
         self.dropout_rate = dropout_rate
+        self.use_feature_refinement = use_feature_refinement
+        self.use_multiscale_head = use_multiscale_head
 
         # Multi-scale ConvLSTM encoder
         self.convlstm_encoder = MultiScaleConvLSTM(
@@ -308,6 +319,7 @@ class ConvLSTM_Guillermo_v1_Seg(nn.Module):
             return_all_layers=False,
             use_attention=use_attention,
             use_residual=use_residual,
+            use_groupnorm=use_groupnorm,
             pyramid_scales=pyramid_scales,
         )
 
@@ -315,30 +327,41 @@ class ConvLSTM_Guillermo_v1_Seg(nn.Module):
         final_hidden_dim = (
             hidden_dims[-1] if isinstance(hidden_dims, list) else hidden_dims
         )
-        self.feature_refinement = nn.Sequential(
-            nn.Conv2d(final_hidden_dim, final_hidden_dim, 3, padding=1, bias=False),
-            nn.BatchNorm2d(final_hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(dropout_rate),
-            nn.Conv2d(
-                final_hidden_dim, final_hidden_dim // 2, 3, padding=1, bias=False
-            ),
-            nn.BatchNorm2d(final_hidden_dim // 2),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(dropout_rate),
-        )
 
-        # Multi-scale classification head
-        self.classification_layers = nn.ModuleList(
-            [
-                nn.Conv2d(final_hidden_dim // 2, num_classes, 1),
-                nn.Conv2d(final_hidden_dim // 2, num_classes, 3, padding=1),
-                nn.Conv2d(final_hidden_dim // 2, num_classes, 5, padding=2),
-            ]
-        )
+        if use_feature_refinement:
+            self.feature_refinement = nn.Sequential(
+                nn.Conv2d(final_hidden_dim, final_hidden_dim, 3, padding=1, bias=False),
+                nn.BatchNorm2d(final_hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Dropout2d(dropout_rate),
+                nn.Conv2d(
+                    final_hidden_dim, final_hidden_dim // 2, 3, padding=1, bias=False
+                ),
+                nn.BatchNorm2d(final_hidden_dim // 2),
+                nn.ReLU(inplace=True),
+                nn.Dropout2d(dropout_rate),
+            )
+            head_input_dim = final_hidden_dim // 2
+        else:
+            self.feature_refinement = None
+            head_input_dim = final_hidden_dim
 
-        # Final fusion layer
-        self.final_fusion = nn.Conv2d(num_classes * 3, num_classes, 1)
+        if use_multiscale_head:
+            # Multi-scale classification head
+            self.classification_layers = nn.ModuleList(
+                [
+                    nn.Conv2d(head_input_dim, num_classes, 1),
+                    nn.Conv2d(head_input_dim, num_classes, 3, padding=1),
+                    nn.Conv2d(head_input_dim, num_classes, 5, padding=2),
+                ]
+            )
+            # Final fusion layer
+            self.final_fusion = nn.Conv2d(num_classes * 3, num_classes, 1)
+        else:
+            # Simple single-conv classification head (like original paper)
+            self.classification_layer = nn.Conv2d(
+                head_input_dim, num_classes, 3, padding=1
+            )
 
         # Deep supervision layers (for intermediate supervision)
         self.deep_supervision = nn.Conv2d(final_hidden_dim, num_classes, 1)
@@ -355,17 +378,24 @@ class ConvLSTM_Guillermo_v1_Seg(nn.Module):
         # Deep supervision output (auxiliary loss)
         deep_sup_output = self.deep_supervision(final_output)
 
-        # Feature refinement
-        refined_features = self.feature_refinement(final_output)
+        # Feature refinement (optional)
+        if self.use_feature_refinement:
+            refined_features = self.feature_refinement(final_output)
+        else:
+            refined_features = final_output
 
-        # Multi-scale classification
-        multi_scale_outputs = []
-        for cls_layer in self.classification_layers:
-            multi_scale_outputs.append(cls_layer(refined_features))
-
-        # Fuse multi-scale outputs
-        fused_output = torch.cat(multi_scale_outputs, dim=1)
-        final_prediction = self.final_fusion(fused_output)
+        # Classification
+        if self.use_multiscale_head:
+            # Multi-scale classification
+            multi_scale_outputs = []
+            for cls_layer in self.classification_layers:
+                multi_scale_outputs.append(cls_layer(refined_features))
+            # Fuse multi-scale outputs
+            fused_output = torch.cat(multi_scale_outputs, dim=1)
+            final_prediction = self.final_fusion(fused_output)
+        else:
+            # Simple classification
+            final_prediction = self.classification_layer(refined_features)
 
         return final_prediction, deep_sup_output
 
@@ -397,6 +427,9 @@ class ConvLSTM_Guillermo_v1(BaseModel):
         pyramid_scales: List[int] = None,
         use_attention: bool = True,
         use_residual: bool = True,
+        use_groupnorm: bool = True,
+        use_feature_refinement: bool = True,
+        use_multiscale_head: bool = True,
         dropout_rate: float = 0.1,
         deep_supervision_weight: float = 0.3,
         *args: Any,
@@ -454,6 +487,9 @@ class ConvLSTM_Guillermo_v1(BaseModel):
             pyramid_scales=pyramid_scales,
             use_attention=use_attention,
             use_residual=use_residual,
+            use_groupnorm=use_groupnorm,
+            use_feature_refinement=use_feature_refinement,
+            use_multiscale_head=use_multiscale_head,
             dropout_rate=dropout_rate,
         )
 
