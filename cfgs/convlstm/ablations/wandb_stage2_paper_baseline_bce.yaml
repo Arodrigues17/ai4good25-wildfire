@@ -1,13 +1,12 @@
-# Stage 2 Ablation Sweep: PAPER BASELINE
-# Closest match to original paper's ConvLSTM architecture
-# Should get ~0.34-0.35 AP if implementation is equivalent
+# Stage 2 Ablation Sweep: PAPER BASELINE with BCE
+# Tests if Focal Loss is what's boosting baseline from 0.35 to 0.43
 
 command:
   - ${env}
   - python
   - ${program}
   - -c
-  - cfgs/convlstm/ablations/stage2_paper_baseline.yaml
+  - cfgs/convlstm/ablations/stage2_paper_baseline_bce.yaml
   - --trainer
   - cfgs/trainer_single_gpu.yaml
   - --data
@@ -26,8 +25,9 @@ metric:
 parameters:
   data.data_fold_id:
     values:
-      - 4
-      - 6
+      - 0
+      - 5
+      - 10
   do_test:
     value: True
 program: src/train.py
