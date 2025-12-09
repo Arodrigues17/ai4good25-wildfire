@@ -8,7 +8,7 @@ command:
   - -c
   - cfgs/convlstm/ablations/original_paper_convlstm.yaml
   - --trainer
-  - cfgs/trainer_single_gpu.yaml
+  - cfgs/trainer_original_paper.yaml
   - --data
   - cfgs/data_monotemporal_full_features.yaml
   - --data.batch_size
