@@ -13,6 +13,7 @@ model:
     n_channels: 40
     flatten_temporal_dimension: false
     pos_class_weight: 236
+    loss_function: "BCE"  # Original paper used BCE, not Focal
     img_height_width: [128, 128]
     kernel_size: [3, 3]
     num_layers: 1  # Original paper: 1 layer
