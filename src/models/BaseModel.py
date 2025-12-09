@@ -28,6 +28,7 @@ class BaseModel(pl.LightningModule, ABC):
         use_doy: bool = False,
         required_img_size: Optional[Tuple[int, int]] = None,
         physics_loss_weight: float = 0.0,
+        physics_kernel_size: int = 3,
         *args: Any,
         **kwargs: Any
     ):
@@ -44,6 +45,8 @@ class BaseModel(pl.LightningModule, ABC):
             When using a model that requires a specific image size, this parameter can be used to indicate it. We assume models require square images, 
             so this parameter indicates the side length. If set, the forward method will perform repeated inference on crops of the 
             image, and aggregate the results. This also works for non-square images. 
+            physics_loss_weight (float, optional): Weight for the physics-informed loss. Defaults to 0.0.
+            physics_kernel_size (int, optional): Kernel size for the physics-informed loss dilation. Defaults to 3.
         """
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
@@ -313,8 +316,8 @@ class BaseModel(pl.LightningModule, ABC):
                 prev_fire = x[:, -1, -1, :, :]
                 
                 # Dilate to create "plausible spread zone"
-                # Use 3x3 kernel for dilation
-                kernel_size = 3
+                # Use configurable kernel size for dilation
+                kernel_size = self.hparams.physics_kernel_size
                 padding = kernel_size // 2
                 prev_fire_unsqueezed = prev_fire.unsqueeze(1) # (B, 1, H, W)
                 

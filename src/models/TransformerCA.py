@@ -135,7 +135,7 @@ class TransformerCAModule(nn.Module):
         # Processing such a large batch size (B*H*W) in one go might be problematic.
         # Let's process in chunks if necessary.
         
-        chunk_size = 1024 
+        chunk_size = 256 # Reduced chunk size to save memory
         all_layer_logits = [[] for _ in range(len(self.layers))]
 
         for i in range(0, x.shape[0], chunk_size):
@@ -184,6 +184,7 @@ class TransformerCA(BaseModel):
         use_doy: bool = False,
         n_leading_observations: int = 1,
         use_temporal_attention: bool = False,
+        physics_kernel_size: int = 3,
         **kwargs
     ):
         """
@@ -206,6 +207,7 @@ class TransformerCA(BaseModel):
             flatten_temporal_dimension=flatten_temporal_dimension,
             pos_class_weight=pos_class_weight, 
             use_doy=use_doy,
+            physics_kernel_size=physics_kernel_size,
             **kwargs
         )
         self.save_hyperparameters()
