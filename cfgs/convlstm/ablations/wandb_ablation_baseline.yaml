@@ -1,0 +1,33 @@
+# Ablation Study - Stage 1: Component Ablations for ConvLSTM_Guillermo_v1
+# Tests each architectural component individually on 3 folds (0, 5, 10)
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - -c
+  - cfgs/convlstm/ablations/baseline.yaml
+  - --trainer
+  - cfgs/trainer_single_gpu.yaml
+  - --data
+  - cfgs/data_monotemporal_full_features.yaml
+  - --data.batch_size
+  - "15"
+  - --data.load_from_hdf5
+  - "true"
+  - --data.data_dir
+  - /zfs/ai4good/student/antrod/data/hdf5
+  - ${args}
+method: grid
+metric:
+  goal: maximize
+  name: test_AP
+parameters:
+  data.data_fold_id:
+    values:
+      - 4
+      - 6
+      - 10
+  do_test:
+    value: True
+program: src/train.py

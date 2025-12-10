@@ -1,42 +1,63 @@
-from pytorch_lightning.utilities import rank_zero_only
-import torch
-from dataloader.FireSpreadDataModule import FireSpreadDataModule
-from pytorch_lightning.cli import LightningCLI
-from models import SMPModel, BaseModel, ConvLSTMLightning, LogisticRegression  # noqa
-from models import BaseModel
-import wandb
+import hashlib
 import os
 from pathlib import Path
-import hashlib
 
+import torch
+import wandb
+from pytorch_lightning.cli import LightningCLI
+from pytorch_lightning.utilities import rank_zero_only
+
+from dataloader.FireSpreadDataModule import FireSpreadDataModule
 from dataloader.FireSpreadDataset import FireSpreadDataset
 from dataloader.utils import get_means_stds_missing_values
+from models import (  # noqa
+    BaseModel,
+    ConvLSTM_Guillermo_v1,
+    ConvLSTMLightning,
+    LogisticRegression,
+    SMPModel,
+)
 
-os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
-torch.set_float32_matmul_precision('high')
+os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+torch.set_float32_matmul_precision("high")
 
 
 class MyLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
-        parser.link_arguments("trainer.default_root_dir",
-                              "trainer.logger.init_args.save_dir")
-        parser.link_arguments("model.class_path",
-                              "trainer.logger.init_args.name")
-        parser.add_argument("--do_train", type=bool,
-                            help="If True: skip training the model.")
-        parser.add_argument("--do_predict", type=bool,
-                            help="If True: compute predictions.")
-        parser.add_argument("--do_test", type=bool,
-                            help="If True: compute test metrics.")
-        parser.add_argument("--do_validate", type=bool,
-                            default=False, help="If True: compute val metrics.")
-        parser.add_argument("--ckpt_path", type=str, default=None,
-                            help="Path to checkpoint to load for resuming training, for testing and predicting.")
-        parser.add_argument("--unique_tag", type=str, default=None,
-                            help="A unique tag to add to the wandb run name, this unique tag should be the same " \
-                            "for different folds of the same configuration. This makes it easier to group fold runs in wandb." \
-                            "If None, it will be automatically set to a hash of the three" \
-                            "config yaml files used to run the experiment (data, trainer, config).")
+        parser.link_arguments(
+            "trainer.default_root_dir", "trainer.logger.init_args.save_dir"
+        )
+        parser.link_arguments("model.class_path", "trainer.logger.init_args.name")
+        parser.add_argument(
+            "--do_train", type=bool, help="If True: skip training the model."
+        )
+        parser.add_argument(
+            "--do_predict", type=bool, help="If True: compute predictions."
+        )
+        parser.add_argument(
+            "--do_test", type=bool, help="If True: compute test metrics."
+        )
+        parser.add_argument(
+            "--do_validate",
+            type=bool,
+            default=False,
+            help="If True: compute val metrics.",
+        )
+        parser.add_argument(
+            "--ckpt_path",
+            type=str,
+            default=None,
+            help="Path to checkpoint to load for resuming training, for testing and predicting.",
+        )
+        parser.add_argument(
+            "--unique_tag",
+            type=str,
+            default=None,
+            help="A unique tag to add to the wandb run name, this unique tag should be the same "
+            "for different folds of the same configuration. This makes it easier to group fold runs in wandb."
+            "If None, it will be automatically set to a hash of the three"
+            "config yaml files used to run the experiment (data, trainer, config).",
+        )
 
     def before_instantiate_classes(self):
         # The number of features is only known inside the data module, but we need that info to instantiate the model.
@@ -44,13 +65,15 @@ class MyLightningCLI(LightningCLI):
         n_features = FireSpreadDataset.get_n_features(
             self.config.data.n_leading_observations,
             self.config.data.features_to_keep,
-            self.config.data.remove_duplicate_features)
+            self.config.data.remove_duplicate_features,
+        )
         self.config.model.init_args.n_channels = n_features
 
         # The exact positive class weight changes with the data fold in the data module, but the weight is needed to instantiate the model.
         # Non-fire pixels are marked as missing values in the active fire feature, so we simply use that to compute the positive class weight.
         train_years, _, _ = FireSpreadDataModule.split_fires(
-            self.config.data.data_fold_id)
+            self.config.data.data_fold_id
+        )
         _, _, missing_values_rates = get_means_stds_missing_values(train_years)
         fire_rate = 1 - missing_values_rates[-1]
         pos_class_weight = float(1 / fire_rate)
@@ -70,12 +93,16 @@ class MyLightningCLI(LightningCLI):
     def wandb_setup(self):
         """
         Save the config used by LightningCLI to disk, then save that file to wandb.
-        Using wandb.config adds some strange formating that means we'd have to do some 
+        Using wandb.config adds some strange formating that means we'd have to do some
         processing to be able to use it again as CLI input.
 
-        Also define min and max metrics in wandb, because otherwise it just reports the 
+        Also define min and max metrics in wandb, because otherwise it just reports the
         last known values, which is not what we want.
         """
+        # Check if wandb run is initialized
+        if wandb.run is None:
+            return
+
         config_file_name = os.path.join(wandb.run.dir, "cli_config.yaml")
 
         cfg_string = self.parser.dump(self.config, skip_none=False)
@@ -86,17 +113,20 @@ class MyLightningCLI(LightningCLI):
         wandb.define_metric("val_loss", summary="min")
         wandb.define_metric("train_f1_epoch", summary="max")
         wandb.define_metric("val_f1", summary="max")
-        
+        # Add the new AP metrics
+        wandb.define_metric("train/ap", summary="max")
+        wandb.define_metric("val_ap", summary="max")
+
         unique_tag = self.config.unique_tag
-        if unique_tag is None: # This may not work when using sweeps so better set tag manually in that case
+        if (
+            unique_tag is None
+        ):  # This may not work when using sweeps so better set tag manually in that case
             data_file_name = Path(self.config.data.__path__.absolute).name
-            trainer_file_name = Path(
-                self.config.trainer.__path__.absolute).name
-            model_file_name = Path(
-                self.config.config[0].absolute).name
+            trainer_file_name = Path(self.config.trainer.__path__.absolute).name
+            model_file_name = Path(self.config.config[0].absolute).name
             tag_string = f"{data_file_name}|{trainer_file_name}|{model_file_name}"
             unique_tag = hashlib.md5(tag_string.encode()).hexdigest()[:8]
-        #Set as a config value for grouping in wandb
+        # Set as a config value for grouping in wandb
         if wandb.run is not None:
             wandb.config.update({"unique_tag": unique_tag}, allow_val_change=True)
 
@@ -105,13 +135,18 @@ def main():
 
     # LightningCLI automatically creates an argparse parser with required arguments and types,
     # and instantiates the model and datamodule. For this, it's important to import the model and datamodule classes above.
-    cli = MyLightningCLI(BaseModel, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={
-        "overwrite": True}, parser_kwargs={"parser_mode": "yaml"}, run=False)
+    cli = MyLightningCLI(
+        BaseModel,
+        FireSpreadDataModule,
+        subclass_mode_model=True,
+        save_config_kwargs={"overwrite": True},
+        parser_kwargs={"parser_mode": "yaml"},
+        run=False,
+    )
     cli.wandb_setup()
 
     if cli.config.do_train:
-        cli.trainer.fit(cli.model, cli.datamodule,
-                        ckpt_path=cli.config.ckpt_path)
+        cli.trainer.fit(cli.model, cli.datamodule, ckpt_path=cli.config.ckpt_path)
 
     # If we have trained a model, use the best checkpoint for testing and predicting.
     # Without this, the model's state at the end of the training would be used, which is not necessarily the best.
@@ -129,17 +164,21 @@ def main():
 
         # Produce predictions, save them in a single file, including ground truth fire targets and input fire masks.
         prediction_output = cli.trainer.predict(
-            cli.model, cli.datamodule, ckpt_path=ckpt)
+            cli.model, cli.datamodule, ckpt_path=ckpt
+        )
         x_af = torch.cat(
-            list(map(lambda tup: tup[0][:, -1, :, :].squeeze(), prediction_output)), axis=0)
+            list(map(lambda tup: tup[0][:, -1, :, :].squeeze(), prediction_output)),
+            axis=0,
+        )
         y = torch.cat(list(map(lambda tup: tup[1], prediction_output)), axis=0)
-        y_hat = torch.cat(
-            list(map(lambda tup: tup[2], prediction_output)), axis=0)
+        y_hat = torch.cat(list(map(lambda tup: tup[2], prediction_output)), axis=0)
         fire_masks_combined = torch.cat(
-            [x_af.unsqueeze(0), y_hat.unsqueeze(0), y.unsqueeze(0)], axis=0)
+            [x_af.unsqueeze(0), y_hat.unsqueeze(0), y.unsqueeze(0)], axis=0
+        )
 
         predictions_file_name = os.path.join(
-            cli.config.trainer.default_root_dir, f"predictions_{wandb.run.id}.pt")
+            cli.config.trainer.default_root_dir, f"predictions_{wandb.run.id}.pt"
+        )
         torch.save(fire_masks_combined, predictions_file_name)
 
 

@@ -1,0 +1,27 @@
+# Stage 2 Ablation: TWO LAYERS
+# Tests intermediate depth between 1 and 3 layers
+seed_everything: 0
+optimizer: 
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.001
+model:
+  class_path: models.ConvLSTM_Guillermo_v1.ConvLSTM_Guillermo_v1
+  init_args:
+    n_channels: 40
+    flatten_temporal_dimension: false
+    pos_class_weight: 236
+    loss_function: "Focal"
+    img_height_width: [128, 128]
+    kernel_sizes: [[3, 3], [3, 3]]
+    hidden_dims: [64, 128]  # ABLATION: 2 layers
+    num_layers: 2  # ABLATION: 2 layers
+    pyramid_scales: [1]
+    use_attention: false
+    use_residual: false
+    dropout_rate: 0.1
+    deep_supervision_weight: 0.0
+
+do_train: true
+do_test: true
+do_predict: false

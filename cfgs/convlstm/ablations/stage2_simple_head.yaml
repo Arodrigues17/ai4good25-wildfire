@@ -1,0 +1,29 @@
+# Stage 2 Ablation: SIMPLE CLASSIFICATION HEAD
+# Tests if multi-scale classification head (1x1, 3x3, 5x5) matters
+# Requires model modification - use_multiscale_head parameter
+seed_everything: 0
+optimizer: 
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.001
+model:
+  class_path: models.ConvLSTM_Guillermo_v1.ConvLSTM_Guillermo_v1
+  init_args:
+    n_channels: 40
+    flatten_temporal_dimension: false
+    pos_class_weight: 236
+    loss_function: "Focal"
+    img_height_width: [128, 128]
+    kernel_sizes: [[3, 3], [3, 3], [3, 3]]
+    hidden_dims: [64, 128, 256]
+    num_layers: 3
+    pyramid_scales: [1]
+    use_attention: false
+    use_residual: false
+    use_multiscale_head: false  # ABLATION: Simple single-conv head
+    dropout_rate: 0.1
+    deep_supervision_weight: 0.0
+
+do_train: true
+do_test: true
+do_predict: false

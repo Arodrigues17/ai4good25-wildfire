@@ -1,0 +1,31 @@
+# Stage 2 Ablation: PAPER BASELINE
+# Closest match to original paper's ConvLSTM architecture
+# 1 layer, hidden_dim=64, simple head, no normalization
+seed_everything: 0
+optimizer: 
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.001
+model:
+  class_path: models.ConvLSTM_Guillermo_v1.ConvLSTM_Guillermo_v1
+  init_args:
+    n_channels: 40
+    flatten_temporal_dimension: false
+    pos_class_weight: 236
+    loss_function: "Focal"
+    img_height_width: [128, 128]
+    kernel_sizes: [[3, 3]]
+    hidden_dims: [64]  # Original paper: single hidden dim
+    num_layers: 1  # Original paper: 1 layer
+    pyramid_scales: [1]
+    use_attention: false
+    use_residual: false
+    use_groupnorm: false  # Original paper: no normalization
+    use_multiscale_head: false  # Original paper: simple head
+    use_feature_refinement: false  # Original paper: no refinement
+    dropout_rate: 0.0  # Original paper: no dropout
+    deep_supervision_weight: 0.0
+
+do_train: true
+do_test: true
+do_predict: false

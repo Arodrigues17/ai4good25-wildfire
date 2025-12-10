@@ -6,22 +6,20 @@ precision: 32-true
 logger: 
   class_path: pytorch_lightning.loggers.wandb.WandbLogger
   init_args:
-    # Determined via argument linking in train.py
-    # save_dir: ${fit.trainer.default_root_dir}
     project: wildfire_progression
     log_model: true
 callbacks: 
   - class_path: pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint
     init_args:
-      monitor: val_ap
+      monitor: val_f1
       mode: max
       save_top_k: 3
-      filename: "convlstm_guillermo_v1_{epoch:03d}_{val_ap:.4f}"
+      filename: "original_convlstm_{epoch:03d}_{val_f1:.4f}"
       save_last: true
       every_n_epochs: 1
   - class_path: pytorch_lightning.callbacks.EarlyStopping
     init_args:
-      monitor: val_ap
+      monitor: val_f1
       mode: max
       patience: 40
       min_delta: 0.001
@@ -40,7 +38,7 @@ limit_train_batches: null
 limit_val_batches: null
 limit_test_batches: null
 limit_predict_batches: null
-overfit_batches: 0.0 # off
+overfit_batches: 0.0
 val_check_interval: null
 check_val_every_n_epoch: 1
 num_sanity_val_steps: 2
@@ -51,8 +49,8 @@ enable_model_summary: true
 accumulate_grad_batches: 1
 gradient_clip_val: 1.0
 gradient_clip_algorithm: norm
-deterministic: warn
-benchmark: false
+deterministic: null
+benchmark: null
 inference_mode: true
 use_distributed_sampler: true
 profiler: null
