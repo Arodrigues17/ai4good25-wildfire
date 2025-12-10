@@ -1,53 +1,58 @@
-# ConvLSTM Guillermo v2 - Enhanced Model Guide
+# ConvLSTM_Guillermo_v2 - Experimental Development (NOT RELEASED)
+
+> ⚠️ **EXPERIMENTAL MODEL - NOT PART OF FINAL SUBMISSION**  
+> This model contains additional enhancements that were explored but not fully tested or validated.  
+> For the **official released model**, see [ConvLSTM_Guillermo_v1_Guide.md](ConvLSTM_Guillermo_v1_Guide.md).  
+> v2 is provided for future research and development but is not included in the paper submission.
 
 ## Overview
-ConvLSTM_Guillermo_v2 is an enhanced version of the wildfire spread prediction model with significant architectural and training improvements based on analysis of v1 results (val_ap=0.48, train_ap=0.54).
+ConvLSTM_Guillermo_v2 is an experimental enhancement of the v1 model with additional architectural features that showed promise but require further development and validation. Based on initial v1 analysis (val_ap=0.48, train_ap=0.54), v2 explores more aggressive architectural changes.
 
 ## Key Improvements Over v1
 
-### 1. **Bidirectional Temporal Processing** 🔄
+### 1. **Bidirectional Temporal Processing** 
 - **v1**: Unidirectional ConvLSTM (forward only)
 - **v2**: Bidirectional ConvLSTM processing sequences forward AND backward
 - **Benefit**: Captures temporal context from both directions, better understanding of fire progression patterns
 
-### 2. **Temporal Attention Mechanism** 🎯
+### 2. **Temporal Attention Mechanism** 
 - **New Feature**: Multi-head temporal attention layer
 - Learns which timesteps are most important for prediction
 - Fire spread dynamics vary over time - some moments are more critical than others
 - 4 attention heads for diverse temporal pattern recognition
 
-### 3. **Enhanced Multi-Scale Pyramid Pooling** 📐
+### 3. **Enhanced Multi-Scale Pyramid Pooling** 
 - **v1**: 3 scales [1, 2, 4]
 - **v2**: 4 scales [1, 2, 4, 8]
 - **Benefit**: Captures larger fire spread patterns and contextual information
 
-### 4. **Skip Connections & Feature Fusion** 🔗
+### 4. **Skip Connections & Feature Fusion** 
 - All encoder layers now contribute to final prediction via skip connections
 - Better gradient flow and multi-level feature integration
 - Reduces information loss through the network depth
 
-### 5. **Stochastic Depth Regularization** 🎲
+### 5. **Stochastic Depth Regularization** 
 - Randomly drops ConvLSTM layers during training (rate: 0.1)
 - Prevents over-reliance on specific layers
 - Improves generalization and reduces overfitting
 
-### 6. **Dilated Convolutions in Classification** 🌊
+### 6. **Dilated Convolutions in Classification** 
 - Classification head uses dilated convolutions [1, 2, 4]
 - Increases receptive field without losing resolution
 - Better captures irregular fire spread patterns
 
-### 7. **Enhanced Loss Function** ⚖️
+### 7. **Enhanced Loss Function** 
 - **v1**: Focal loss only
 - **v2**: Combined FocalDice loss (0.5 Focal + 0.5 Dice)
 - **Benefit**: Balances pixel-wise accuracy (Focal) with region-based IoU (Dice)
 - Better for highly imbalanced segmentation
 
-### 8. **Improved Regularization** 🛡️
+### 8. **Improved Regularization** 
 - **Dropout**: Increased from 0.1 → 0.2 (progressive: higher in deeper layers)
 - **Weight Decay**: Added 0.01 to AdamW optimizer
 - **Deep Supervision**: Weight increased from 0.3 → 0.5
 
-### 9. **Advanced Learning Rate Schedule** 📈
+### 9. **Advanced Learning Rate Schedule** 
 - **v1**: Fixed lr=0.001
 - **v2**: Cosine annealing with warm restarts
   - Initial lr: 0.003 (3x higher)

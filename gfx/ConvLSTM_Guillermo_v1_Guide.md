@@ -162,14 +162,14 @@ wandb agent <SWEEP_ID>
 The model uses PyTorch Lightning CLI with YAML configs:
 
 1. **Model Config** (`--config`): Defines architecture, loss, optimizer
-   - `cfgs/convlstm_guillermo_v1_config.yaml` - Main v1 config
+   - `cfgs/models/convlstm_v1/convlstm_guillermo_v1_config.yaml` - Main v1 config
 
 2. **Trainer Config** (`--trainer`): Training loop settings
-   - `cfgs/trainer_single_gpu.yaml` - 170 max epochs, early stopping (patience=40)
-   - `cfgs/trainer_test_short.yaml` - 5 epochs for quick testing
+   - `cfgs/trainers/trainer_single_gpu.yaml` - 170 max epochs, early stopping (patience=40)
+   - `cfgs/trainers/trainer_test_short.yaml` - 5 epochs for quick testing
 
 3. **Data Config** (`--data`): Dataset and loading parameters
-   - `cfgs/data_monotemporal_full_features.yaml` - All 40 features, single timestep
+   - `cfgs/data/data_monotemporal_full_features.yaml` - All 40 features, single timestep
 
 ### Key Hyperparameters
 
@@ -213,14 +213,14 @@ lr_scheduler:
 
 ### Running Ablations
 
-See [`cfgs/convlstm/ablations/README.md`](../cfgs/convlstm/ablations/README.md) for comprehensive ablation study documentation.
+See [`cfgs/models/convlstm_v1/ablations/README.md`](../cfgs/models/convlstm_v1/ablations/README.md) for comprehensive ablation study documentation.
 
 **Example - Test without attention:**
 ```bash
 python src/train.py \
-    --config cfgs/convlstm/ablations/no_attention.yaml \
-    --trainer cfgs/trainer_single_gpu.yaml \
-    --data cfgs/data_monotemporal_full_features.yaml \
+    --config cfgs/models/convlstm_v1/ablations/no_attention.yaml \
+    --trainer cfgs/trainers/trainer_single_gpu.yaml \
+    --data cfgs/data/data_monotemporal_full_features.yaml \
     --data.batch_size 15 \
     --data.data_dir /path/to/data \
     --data.data_fold_id 0
@@ -433,23 +433,26 @@ See [`cfgs/convlstm/ablations/README.md`](../cfgs/convlstm/ablations/README.md) 
 
 ## Model Variants
 
-### ConvLSTM_Guillermo_v1 (This Model)
+### ConvLSTM_Guillermo_v1 (This Model) 
 - **Focus**: Balanced performance and interpretability
 - **Architecture**: Unidirectional, 3 layers
 - **Performance**: 0.46 AP, 0.18 UCE
-- **Status**: Main model for paper submission
+- **Status**:  **FINAL RELEASED MODEL - Official paper submission**
+- **Validation**: Fully tested with 12-fold cross-validation
+- **Recommended**: Use this model for all official experiments
 
-### ConvLSTM_Guillermo_v2 (Experimental)
-- **Focus**: Maximum performance
+### ConvLSTM_Guillermo_v2 (Experimental) ⚠️
+- **Focus**: Exploratory enhancements for future research
 - **Architecture**: Bidirectional, temporal attention, FocalDice loss
 - **Config**: `cfgs/convlstm_guillermo_v2_config.yaml`
 - **Guide**: [`ConvLSTM_Guillermo_v2_Guide.md`](ConvLSTM_Guillermo_v2_Guide.md)
-- **Status**: Under development
+- **Status**: ⚠️ **EXPERIMENTAL - Not fully validated, not part of official release**
+- **Note**: Requires additional development and validation before use
 
 ### Original ConvLSTM (Paper Baseline)
 - **Architecture**: 1 layer, 64 hidden dims, BCE loss
 - **Performance**: ~0.35 AP
-- **Config**: `cfgs/convlstm/ablations/original_paper_convlstm.yaml`
+- **Config**: `cfgs/models/convlstm_v1/ablations/original_paper_convlstm.yaml`
 - **Purpose**: Baseline comparison
 
 ## References
@@ -461,7 +464,8 @@ See [`cfgs/convlstm/ablations/README.md`](../cfgs/convlstm/ablations/README.md) 
 
 ### Documentation
 - [Main README](../README.md) - Repository overview
-- [Ablation Studies](../cfgs/convlstm/ablations/README.md) - Detailed ablation guide
+- [Config Guide](../cfgs/README.md) - Configuration documentation
+- [Ablation Studies](../cfgs/models/convlstm_v1/ablations/README.md) - Detailed ablation guide
 - [PyTorch Lightning Docs](https://pytorch-lightning.readthedocs.io/)
 
 ### Related Files

@@ -66,9 +66,9 @@ python src/preprocess/CreateHDF5Dataset.py \
 **Quick Test (5 epochs):**
 ```bash
 python src/train.py \
-    --config cfgs/convlstm_guillermo_v1_config.yaml \
-    --trainer cfgs/trainer_test_short.yaml \
-    --data cfgs/data_monotemporal_full_features.yaml \
+    --config cfgs/models/convlstm_v1/convlstm_guillermo_v1_config.yaml \
+    --trainer cfgs/trainers/trainer_test_short.yaml \
+    --data cfgs/data/data_monotemporal_full_features.yaml \
     --data.batch_size 15 \
     --data.data_dir /path/to/hdf5/data \
     --data.data_fold_id 0 \
@@ -78,9 +78,9 @@ python src/train.py \
 **Full Training (Single Fold):**
 ```bash
 python src/train.py \
-    --config cfgs/convlstm_guillermo_v1_config.yaml \
-    --trainer cfgs/trainer_single_gpu.yaml \
-    --data cfgs/data_monotemporal_full_features.yaml \
+    --config cfgs/models/convlstm_v1/convlstm_guillermo_v1_config.yaml \
+    --trainer cfgs/trainers/trainer_single_gpu.yaml \
+    --data cfgs/data/data_monotemporal_full_features.yaml \
     --data.batch_size 15 \
     --data.data_dir /path/to/hdf5/data \
     --data.data_fold_id 0 \
@@ -90,7 +90,7 @@ python src/train.py \
 **12-Fold Cross-Validation:**
 ```bash
 # Using WandB sweeps for automated execution
-wandb sweep cfgs/convlstm/full_run.yaml
+wandb sweep cfgs/models/convlstm_v1/wandb_12fold_cv.yaml
 wandb agent <SWEEP_ID>
 ```
 
@@ -117,7 +117,7 @@ Our enhanced ConvLSTM achieves substantial improvements over baselines:
 
 ## 🔬 Ablation Studies
 
-We provide comprehensive ablation experiments to understand component contributions. See [`cfgs/convlstm/ablations/README.md`](cfgs/convlstm/ablations/README.md) for detailed documentation.
+We provide comprehensive ablation experiments to understand component contributions. See [`cfgs/models/convlstm_v1/ablations/README.md`](cfgs/models/convlstm_v1/ablations/README.md) for detailed documentation.
 
 ### Stage 1: Component Ablations
 
@@ -154,25 +154,27 @@ Tests fundamental design choices (depth, capacity, normalization, classification
 
 ```
 ├── cfgs/                                    # Configuration files
-│   ├── convlstm_guillermo_v1_config.yaml   # Main v1 model config
-│   ├── convlstm_guillermo_v2_config.yaml   # V2 (experimental bidirectional)
-│   ├── trainer_single_gpu.yaml             # Standard training (170 epochs)
-│   ├── trainer_test_short.yaml             # Quick testing (5 epochs)
-│   ├── trainer_original_paper.yaml         # For baseline comparison
-│   ├── data_monotemporal_full_features.yaml# Data config (40 features)
-│   └── convlstm/
-│       ├── ablations/                       # Ablation study configs
-│       │   ├── README.md                    # **Detailed ablation guide**
-│       │   ├── baseline.yaml                # Full model (all features)
-│       │   ├── minimal.yaml                 # No enhancements
-│       │   ├── no_attention.yaml            # Ablate spatial attention
-│       │   ├── no_pyramid.yaml              # Single scale
-│       │   ├── no_residual.yaml             # No skip connections
-│       │   ├── no_deep_supervision.yaml     # Single loss
-│       │   ├── stage2_*.yaml                # Architecture ablations
-│       │   └── wandb_*.yaml                 # WandB sweep configs
-│       ├── full_run.yaml                    # 12-fold CV sweep
-│       └── wandb_table5.yaml                # Reproduce paper Table 5
+│   ├── models/
+│   │   ├── convlstm_v1/                    # ✅ Official v1 model
+│   │   │   ├── convlstm_guillermo_v1_config.yaml
+│   │   │   ├── wandb_12fold_cv.yaml        # 12-fold CV sweep
+│   │   │   └── ablations/                   # Ablation study configs
+│   │   │       ├── README.md                # **Detailed ablation guide**
+│   │   │       ├── baseline.yaml
+│   │   │       ├── stage2_*.yaml
+│   │   │       └── wandb_*.yaml
+│   │   └── convlstm_v2_experimental/        # ⚠️ Experimental v2
+│   │       └── convlstm_guillermo_v2_config.yaml
+│   ├── trainers/                            # Training configurations
+│   │   ├── trainer_single_gpu.yaml          # Standard (170 epochs)
+│   │   ├── trainer_test_short.yaml          # Quick test (5 epochs)
+│   │   └── trainer_original_paper.yaml      # Baseline comparison
+│   ├── data/                                # Dataset configurations
+│   │   ├── data_monotemporal_full_features.yaml  # ✅ Recommended
+│   │   └── data_multitemporal_*.yaml
+│   ├── baselines/                           # Baseline comparisons
+│   ├── README.md                            # **Config usage guide**
+│   └── [unet/, UTAE/, LogisticRegression/]  # Other baselines
 ├── src/
 │   ├── models/
 │   │   ├── ConvLSTM_Guillermo_v1.py        # **Enhanced ConvLSTM**
@@ -195,7 +197,9 @@ Tests fundamental design choices (depth, capacity, normalization, classification
 
 ## 🏗️ Model Architecture
 
-### ConvLSTM_Guillermo_v1
+### ConvLSTM_Guillermo_v1 (Official Released Model)
+
+> **Note**: This is the final, validated model for the paper submission. ConvLSTM_Guillermo_v2 exists as experimental development but is not part of the official release.
 
 **Architecture Overview:**
 
@@ -242,54 +246,50 @@ See `src/models/ConvLSTM_Guillermo_v1.py` for full implementation details.
 
 ## 📖 Configuration Guide
 
+> **📚 Complete Guide**: See [`cfgs/README.md`](cfgs/README.md) for comprehensive config documentation.
+
 ### Model Configurations
 
-- **`convlstm_guillermo_v1_config.yaml`** - Full enhanced model (recommended)
+- **`models/convlstm_v1/convlstm_guillermo_v1_config.yaml`** ✅ - Full enhanced model (recommended)
   - 3 layers, hidden_dims=[64,128,256]
   - All enhancements enabled
   - Focal loss, AdamW optimizer
 
-- **`convlstm_guillermo_v2_config.yaml`** - Experimental bidirectional variant
-  - Bidirectional ConvLSTM
-  - FocalDice loss
-  - Higher capacity
+- **`models/convlstm_v2_experimental/convlstm_guillermo_v2_config.yaml`** ⚠️ - Experimental variant
+  - Bidirectional ConvLSTM, FocalDice loss
+  - Not fully validated, use for research only
 
 ### Trainer Configurations
 
-- **`trainer_single_gpu.yaml`** - Standard training
-  - Max 170 epochs
-  - Early stopping patience=40
+- **`trainers/trainer_single_gpu.yaml`** - Standard training
+  - Max 170 epochs, early stopping patience=40
   - Monitors val_ap
 
-- **`trainer_test_short.yaml`** - Quick testing
-  - Max 5 epochs
-  - 20% of data
+- **`trainers/trainer_test_short.yaml`** - Quick testing
+  - Max 5 epochs, 20% of data
   - For debugging/prototyping
 
-- **`trainer_original_paper.yaml`** - Baseline comparison
+- **`trainers/trainer_original_paper.yaml`** - Baseline comparison
   - Monitors val_f1 (for ConvLSTMLightning compatibility)
-  - Otherwise same as trainer_single_gpu
 
 ### Data Configurations
 
-- **`data_monotemporal_full_features.yaml`** - All 40 input features
+- **`data/data_monotemporal_full_features.yaml`** ✅ - All 40 input features
   - Static: elevation, slope, aspect, land cover, etc.
   - Dynamic: NDVI, burned area, weather, etc.
   - Single timestep input
 
-- `data_multitemporal_full_features.yaml` - Multi-temporal setup
+- **`data/data_multitemporal_full_features.yaml`** - Multi-temporal setup
   - 5-day history of observations
   - For UTAE and temporal models
 
-- `data_multitemporal_full_features_doys.yaml` - With day-of-year encoding
-
 ### Ablation Configurations
 
-All ablation configs are in `cfgs/convlstm/ablations/`. Each config has:
+All ablation configs are in `cfgs/models/convlstm_v1/ablations/`. Each config has:
 - **Model config** (e.g., `baseline.yaml`) - For single fold training
 - **WandB sweep config** (e.g., `wandb_ablation_baseline.yaml`) - For automated 3-fold runs
 
-See [`cfgs/convlstm/ablations/README.md`](cfgs/convlstm/ablations/README.md) for complete documentation.
+See [`cfgs/models/convlstm_v1/ablations/README.md`](cfgs/models/convlstm_v1/ablations/README.md) for complete documentation.
 
 ## 🔧 Advanced Usage
 
@@ -334,8 +334,8 @@ Run it:
 ```bash
 python src/train.py \
     --config my_ablation.yaml \
-    --trainer cfgs/trainer_single_gpu.yaml \
-    --data cfgs/data_monotemporal_full_features.yaml \
+    --trainer cfgs/trainers/trainer_single_gpu.yaml \
+    --data cfgs/data/data_monotemporal_full_features.yaml \
     --data.batch_size 15 \
     --data.data_dir /path/to/data \
     --data.data_fold_id 0
@@ -356,9 +356,9 @@ parameters:
   config:
     value: cfgs/my_config.yaml
   trainer:
-    value: cfgs/trainer_single_gpu.yaml
+    value: cfgs/trainers/trainer_single_gpu.yaml
   data:
-    value: cfgs/data_monotemporal_full_features.yaml
+    value: cfgs/data/data_monotemporal_full_features.yaml
   data.batch_size:
     value: 15
   data.data_dir:

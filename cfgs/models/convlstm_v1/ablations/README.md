@@ -46,9 +46,9 @@ These experiments test the impact of individual architectural enhancements by re
 **Single fold:**
 ```bash
 python src/train.py \
-    --config cfgs/convlstm/ablations/baseline.yaml \
-    --trainer cfgs/trainer_single_gpu.yaml \
-    --data cfgs/data_monotemporal_full_features.yaml \
+    --config cfgs/models/convlstm_v1/ablations/baseline.yaml \
+    --trainer cfgs/trainers/trainer_single_gpu.yaml \
+    --data cfgs/data/data_monotemporal_full_features.yaml \
     --data.batch_size 15 \
     --data.data_dir /path/to/data \
     --data.data_fold_id 0 \
@@ -57,7 +57,7 @@ python src/train.py \
 
 **Multi-fold sweep (recommended):**
 ```bash
-wandb sweep cfgs/convlstm/ablations/wandb_ablation_baseline.yaml
+wandb sweep cfgs/models/convlstm_v1/ablations/wandb_ablation_baseline.yaml
 wandb agent <SWEEP_ID>
 ```
 
@@ -139,9 +139,9 @@ Paper Baseline (0.43 AP)
 **Single configuration:**
 ```bash
 python src/train.py \
-    --config cfgs/convlstm/ablations/stage2_single_layer.yaml \
-    --trainer cfgs/trainer_single_gpu.yaml \
-    --data cfgs/data_monotemporal_full_features.yaml \
+    --config cfgs/models/convlstm_v1/ablations/stage2_single_layer.yaml \
+    --trainer cfgs/trainers/trainer_single_gpu.yaml \
+    --data cfgs/data/data_monotemporal_full_features.yaml \
     --data.batch_size 15 \
     --data.data_dir /path/to/data \
     --data.data_fold_id 0 \
@@ -154,7 +154,7 @@ python src/train.py \
 for config in stage2_*.yaml; do
     sweep_config="wandb_${config}"
     if [ -f "$sweep_config" ]; then
-        wandb sweep cfgs/convlstm/ablations/$sweep_config
+        wandb sweep cfgs/models/convlstm_v1/ablations/$sweep_config
     fi
 done
 
@@ -191,9 +191,9 @@ This helps decompose the performance gap:
 **Original ConvLSTM with BCE:**
 ```bash
 python src/train.py \
-    --config cfgs/convlstm/ablations/original_paper_convlstm.yaml \
-    --trainer cfgs/trainer_original_paper.yaml \
-    --data cfgs/data_monotemporal_full_features.yaml \
+    --config cfgs/models/convlstm_v1/ablations/original_paper_convlstm.yaml \
+    --trainer cfgs/trainers/trainer_original_paper.yaml \
+    --data cfgs/data/data_monotemporal_full_features.yaml \
     --data.batch_size 15 \
     --data.data_dir /path/to/data \
     --data.data_fold_id 0 \
@@ -221,11 +221,11 @@ metric:
   goal: maximize
 parameters:
   config:
-    value: cfgs/convlstm/ablations/baseline.yaml
+    value: cfgs/models/convlstm_v1/ablations/baseline.yaml
   trainer:
-    value: cfgs/trainer_single_gpu.yaml
+    value: cfgs/trainers/trainer_single_gpu.yaml
   data:
-    value: cfgs/data_monotemporal_full_features.yaml
+    value: cfgs/data/data_monotemporal_full_features.yaml
   data.batch_size:
     value: 15
   data.data_dir:
@@ -246,7 +246,7 @@ parameters:
 
 2. **Initialize sweep:**
    ```bash
-   wandb sweep cfgs/convlstm/ablations/wandb_ablation_baseline.yaml
+   wandb sweep cfgs/models/convlstm_v1/ablations/wandb_ablation_baseline.yaml
    ```
 
 3. **Run agent(s):**
@@ -386,3 +386,4 @@ For questions about ablation experiments:
 
 **Last Updated**: 2025  
 **Experiments Run**: Stage 1 complete (6 configs × 3 folds), Stage 2 pending
+

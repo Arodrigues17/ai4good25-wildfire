@@ -1,22 +1,22 @@
-# Ablation: NO Residual Connections
-# Tests model without residual connections
+# Ablation: NO Multi-Scale Pyramid Pooling
+# Tests model without pyramid pooling (single scale only)
 
 command:
   - ${env}
   - python
   - ${program}
   - -c
-  - cfgs/convlstm/ablations/no_residual.yaml
+  - cfgs/models/convlstm_v1/ablations/no_pyramid.yaml
   - --trainer
-  - cfgs/trainer_single_gpu.yaml
+  - cfgs/trainers/trainer_single_gpu.yaml
   - --data
-  - cfgs/data_monotemporal_full_features.yaml
+  - cfgs/data/data_monotemporal_full_features.yaml
   - --data.batch_size
   - "15"
   - --data.load_from_hdf5
   - "true"
   - --data.data_dir
-  - /zfs/ai4good/student/antrod/data/hdf5
+  - /path/to/your/hdf5/dataset  # UPDATE THIS PATH
   - ${args}
 method: grid
 metric:
@@ -31,3 +31,4 @@ parameters:
   do_test:
     value: True
 program: src/train.py
+
