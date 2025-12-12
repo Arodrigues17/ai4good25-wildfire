@@ -136,3 +136,14 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Local WandB configs and cache
+.wandb_cache/
+.wandb_config/
+
+# Temporary and Scratch files
+tmp/
+
+# Model Outputs
+predictions/
+videos/
