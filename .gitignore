@@ -143,3 +143,8 @@ dmypy.json
 # Temporary files
 tmp/
 .wandb_cache/
+
+# Model outputs and local configs
+predictions/
+videos/
+.wandb_config/
