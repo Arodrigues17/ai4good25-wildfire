@@ -110,7 +110,27 @@ export WANDB_CONFIG_DIR="$PWD/.wandb_config"
 export TMPDIR="$PWD/tmp"
 '''
 
-## 5. Tips 🛟
+## 5. TransformerCA Model 🤖
+
+This branch implements a Transformer-based architecture with Cross-Attention (TransformerCA) for wildfire spread prediction.
+
+To train the TransformerCA model, use the following command:
+
+```bash
+python src/train.py \
+    --config cfgs/TransformerCA/improved_model_config.yaml \
+    --trainer cfgs/trainer_single_gpu.yaml \
+    --data cfgs/data_multitemporal_full_features_doys.yaml \
+    --data.data_dir /path/to/your/hdf5/dataset
+```
+
+To run the 12-fold cross-validation sweep:
+```bash
+wandb sweep cfgs/TransformerCA/wandb_fold12.yaml
+wandb agent <SWEEP_ID>
+```
+
+## 6. Tips 🛟
 
 - The present codebase is using Pytorch Lightning which is a wrapper of Pytorch that takes care of all the deep learning code that is common to all projects (e.g., training and evaluation loops). If you are not familiar with it, have a look at the documention to get a high level understanding of how it works, in particular the `LightningModule` and `LightningDataModule` classes.
 - It also uses LightningCLI which allows you to instanciate your models, dataset, and trainer classes using yaml configuration files (but you can always also use the cli). The recommended workflow is to use the config files:
