@@ -2,7 +2,9 @@
 
 This repository contains the implementation of **Enhanced ConvLSTM** models for next-day wildfire spread prediction, developed as part of the WildFireSpreadTS benchmark evaluation.
 
-> **Paper Submission Branch**: This branch (`feature/guillermo_v1`) contains the ConvLSTM architecture and ablation studies for our research paper. The main branch contains the original WildFireSpreadTS baseline implementations from the AI4GOOD class.
+> **Paper Submission Branch**: This branch contains the ConvLSTM architecture and ablation studies for our research paper. The main branch contains the original WildFireSpreadTS baseline implementations from the AI4GOOD class.
+>
+> If you would like to run the TransformerCA variant of the repository, please switch branches to `feature/TransformerCA`.
 
 ## 📋 Overview
 
