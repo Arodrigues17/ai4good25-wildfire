@@ -1,22 +1,22 @@
-# Stage 2 Ablation Sweep: NO FEATURE REFINEMENT
-# Tests if feature refinement block (conv+bn+relu x2) is driving performance
+# Sweep for Original Paper ConvLSTM
+# Should reproduce the 0.35 AP from the original paper
 
 command:
   - ${env}
   - python
   - ${program}
   - -c
-  - cfgs/convlstm/ablations/stage2_no_refinement.yaml
+  - cfgs/models/convlstm_v1/ablations/original_paper_convlstm.yaml
   - --trainer
-  - cfgs/trainer_single_gpu.yaml
+  - cfgs/trainers/trainer_original_paper.yaml
   - --data
-  - cfgs/data_monotemporal_full_features.yaml
+  - cfgs/data/data_monotemporal_full_features.yaml
   - --data.batch_size
   - "15"
   - --data.load_from_hdf5
   - "true"
   - --data.data_dir
-  - /zfs/ai4good/student/antrod/data/hdf5
+  - /path/to/your/hdf5/dataset  # UPDATE THIS PATH
   - ${args}
 method: grid
 metric:
@@ -25,9 +25,10 @@ metric:
 parameters:
   data.data_fold_id:
     values:
-      - 0
-      - 5
+      - 4
+      - 6
       - 10
   do_test:
     value: True
 program: src/train.py
+

@@ -1,22 +1,19 @@
-# Ablation: NO Deep Supervision
-# Tests model without auxiliary deep supervision loss
-
 command:
   - ${env}
   - python
   - ${program}
   - -c
-  - cfgs/convlstm/ablations/no_deep_supervision.yaml
+  - cfgs/models/convlstm_v1/convlstm_guillermo_v1_config.yaml
   - --trainer
-  - cfgs/trainer_single_gpu.yaml
+  - cfgs/trainers/trainer_single_gpu.yaml
   - --data
-  - cfgs/data_monotemporal_full_features.yaml
+  - cfgs/data/data_monotemporal_full_features.yaml
   - --data.batch_size
   - "15"
   - --data.load_from_hdf5
   - "true"
   - --data.data_dir
-  - /zfs/ai4good/student/antrod/data/hdf5
+  - /path/to/your/hdf5/dataset  # UPDATE THIS PATH
   - ${args}
 method: grid
 metric:
@@ -25,9 +22,18 @@ metric:
 parameters:
   data.data_fold_id:
     values:
+      - 0
+      - 1
+      - 2
+      - 3
       - 4
+      - 5
       - 6
+      - 7
+      - 8
+      - 9
       - 10
+      - 11
   do_test:
     value: True
 program: src/train.py

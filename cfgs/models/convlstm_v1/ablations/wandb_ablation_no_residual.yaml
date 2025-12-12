@@ -1,22 +1,22 @@
-# Stage 2 Ablation Sweep: SMALL CAPACITY (half dimensions)
-# Tests if model capacity is driving performance
+# Ablation: NO Residual Connections
+# Tests model without residual connections
 
 command:
   - ${env}
   - python
   - ${program}
   - -c
-  - cfgs/convlstm/ablations/stage2_small_capacity.yaml
+  - cfgs/models/convlstm_v1/ablations/no_residual.yaml
   - --trainer
-  - cfgs/trainer_single_gpu.yaml
+  - cfgs/trainers/trainer_single_gpu.yaml
   - --data
-  - cfgs/data_monotemporal_full_features.yaml
+  - cfgs/data/data_monotemporal_full_features.yaml
   - --data.batch_size
   - "15"
   - --data.load_from_hdf5
   - "true"
   - --data.data_dir
-  - /zfs/ai4good/student/antrod/data/hdf5
+  - /path/to/your/hdf5/dataset  # UPDATE THIS PATH
   - ${args}
 method: grid
 metric:
@@ -25,9 +25,10 @@ metric:
 parameters:
   data.data_fold_id:
     values:
-      - 0
-      - 5
+      - 4
+      - 6
       - 10
   do_test:
     value: True
 program: src/train.py
+

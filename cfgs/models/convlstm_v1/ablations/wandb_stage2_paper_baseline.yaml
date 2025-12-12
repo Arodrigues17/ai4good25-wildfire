@@ -7,17 +7,17 @@ command:
   - python
   - ${program}
   - -c
-  - cfgs/convlstm/ablations/stage2_paper_baseline.yaml
+  - cfgs/models/convlstm_v1/ablations/stage2_paper_baseline.yaml
   - --trainer
-  - cfgs/trainer_single_gpu.yaml
+  - cfgs/trainers/trainer_single_gpu.yaml
   - --data
-  - cfgs/data_monotemporal_full_features.yaml
+  - cfgs/data/data_monotemporal_full_features.yaml
   - --data.batch_size
   - "15"
   - --data.load_from_hdf5
   - "true"
   - --data.data_dir
-  - /zfs/ai4good/student/antrod/data/hdf5
+  - /path/to/your/hdf5/dataset  # UPDATE THIS PATH
   - ${args}
 method: grid
 metric:
@@ -31,3 +31,4 @@ parameters:
   do_test:
     value: True
 program: src/train.py
+
